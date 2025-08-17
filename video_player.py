@@ -5,6 +5,9 @@ import sys
 import os
 from pathlib import Path
 import time
+import subprocess
+import json
+import re
 
 class VideoPlayer:
     def __init__(self, root):
@@ -16,10 +19,13 @@ class VideoPlayer:
         self.player = self.instance.media_player_new()
         self.current_media = None
         self.is_user_seeking = False
-        self.subtitle_end_times = []
+        self.subtitles = []  # List of (start_ms, end_ms, text) tuples
         self.current_subtitle_index = 0
         self.auto_pause_enabled = False
         self.next_pause_time = None
+        self.pause_offset = 50  # Pause 50ms before subtitle ends (just for timing precision)
+        self.current_subtitle_text = ""
+        self.subtitle_display_index = -1
         
         self.setup_ui()
         
@@ -33,41 +39,45 @@ class VideoPlayer:
             self.player.set_xwindow(self.video_frame.winfo_id())
         
     def setup_ui(self):
+        # Use grid for predictable layout
+        self.root.grid_rowconfigure(1, weight=1)  # Video frame row expands
+        self.root.grid_columnconfigure(0, weight=1)
+        
+        # Row 0: Control buttons
         control_frame = ttk.Frame(self.root)
-        control_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         
         ttk.Button(control_frame, text="Open Video", command=self.open_video).pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text="Play/Pause", command=self.play_pause).pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text="Stop", command=self.stop).pack(side=tk.LEFT, padx=5)
         
-        # Subtitle controls
-        ttk.Label(control_frame, text="Subtitles:").pack(side=tk.LEFT, padx=(20, 5))
-        self.subtitle_combo = ttk.Combobox(control_frame, state="readonly", width=20)
-        self.subtitle_combo.pack(side=tk.LEFT, padx=5)
-        self.subtitle_combo.bind("<<ComboboxSelected>>", self.on_subtitle_change)
-        
+        # Row 1: Video frame (expands)
         self.video_frame = ttk.Frame(self.root, width=800, height=400)
-        self.video_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.video_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         
-        # Subtitle display frame
+        # Row 2: Subtitle display
         subtitle_frame = ttk.Frame(self.root)
-        subtitle_frame.pack(fill=tk.X, padx=5, pady=5)
+        subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        
+        self.subtitle_display = ttk.Label(subtitle_frame, text="", font=font.Font(size=16), foreground="white", background="black")
+        self.subtitle_display.pack(pady=5)
         
         self.subtitle_label = ttk.Label(subtitle_frame, text="", font=font.Font(size=14), foreground="blue")
-        self.subtitle_label.pack(pady=10)
+        self.subtitle_label.pack(pady=5)
         
-        # Continue button (initially hidden)
         self.continue_button = ttk.Button(subtitle_frame, text="Continue (Enter)", command=self.continue_playback, state="disabled")
         self.continue_button.pack(pady=5)
         
+        # Row 3: Progress bar
+        self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
+        self.progress_bar.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+        
+        # Row 4: Time label
+        self.time_label = ttk.Label(self.root, text="00:00 / 00:00")
+        self.time_label.grid(row=4, column=0, pady=5)
+        
         # Bind Enter key to continue
         self.root.bind('<Return>', lambda e: self.continue_playback())
-        
-        self.time_label = ttk.Label(self.root, text="00:00 / 00:00")
-        self.time_label.pack(side=tk.BOTTOM, pady=5)
-        
-        self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
-        self.progress_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
         
         self.progress_bar.bind("<ButtonPress-1>", lambda e: setattr(self, 'is_user_seeking', True))
         self.progress_bar.bind("<ButtonRelease-1>", lambda e: setattr(self, 'is_user_seeking', False))
@@ -98,6 +108,9 @@ class VideoPlayer:
             self.auto_pause_enabled = True
             self.current_subtitle_index = 0
             
+            # Extract subtitles
+            self.extract_subtitles(file_path)
+            
             print(f"Loaded video: {Path(file_path).name}")
             
     def play_pause(self):
@@ -110,44 +123,16 @@ class VideoPlayer:
         self.player.stop()
         
     def load_subtitle_tracks(self):
-        # Get subtitle tracks
-        track_count = self.player.video_get_spu_count()
+        # Disable VLC's subtitle rendering - we'll handle it ourselves
+        self.player.video_set_spu(-1)
         
-        subtitle_options = ["None"]
-        subtitle_values = [-1]  # -1 means no subtitles
-        
-        for i in range(track_count):
-            desc = self.player.video_get_spu_description()
-            if desc:
-                for track_id, track_name in desc:
-                    if track_id >= 0:  # Skip the "Disable" option which is -1
-                        subtitle_options.append(track_name.decode('utf-8') if isinstance(track_name, bytes) else str(track_name))
-                        subtitle_values.append(track_id)
-                break
-        
-        # Update combobox
-        self.subtitle_combo['values'] = subtitle_options
-        self.subtitle_values = subtitle_values
-        
-        # Select first subtitle track if available (after "None")
-        if len(subtitle_options) > 1:
-            self.subtitle_combo.current(1)
-            self.player.video_set_spu(subtitle_values[1])
-        else:
-            self.subtitle_combo.current(0)
-            
         # Pause after loading tracks
         self.player.pause()
         
-        # Initialize pause timing
-        self.set_next_pause_time()
+        # Set first pause time if subtitles are available
+        if self.subtitles:
+            self.set_next_pause_time()
         
-    def on_subtitle_change(self, event):
-        selection = self.subtitle_combo.current()
-        if selection >= 0 and hasattr(self, 'subtitle_values'):
-            track_id = self.subtitle_values[selection]
-            self.player.video_set_spu(track_id)
-            print(f"Changed subtitle track to: {self.subtitle_combo.get()} (ID: {track_id})")
         
     def on_seek(self, value):
         if self.is_user_seeking and self.player.get_media():
@@ -170,6 +155,9 @@ class VideoPlayer:
                 duration_str = self.format_time(duration)
                 self.time_label.config(text=f"{current_str} / {duration_str}")
             
+            # Update subtitle display
+            self.update_subtitle_display(current_time)
+            
             # Check for subtitle auto-pause
             if self.auto_pause_enabled and self.next_pause_time and current_time >= self.next_pause_time:
                 self.pause_for_typing()
@@ -187,30 +175,115 @@ class VideoPlayer:
         self.continue_button.config(state="normal")
         self.next_pause_time = None
         
-        # Get current subtitle text
-        current_sub = self.get_current_subtitle()
-        if current_sub:
-            self.subtitle_label.config(text=f"Type this word: {current_sub}")
+        # Get current subtitle text and pick a word
+        # Note: current_subtitle_index was already incremented in set_next_pause_time
+        # so we need to use index - 1 to get the subtitle we just paused for
+        if self.current_subtitle_index > 0 and self.current_subtitle_index <= len(self.subtitles):
+            start_ms, end_ms, text = self.subtitles[self.current_subtitle_index - 1]
+            current_time = self.player.get_time()
+            print(f"DEBUG: Paused at {current_time}ms for subtitle #{self.current_subtitle_index-1}")
+            print(f"DEBUG: Subtitle time: {start_ms}-{end_ms}ms, Text: {text[:50]}...")
+            
+            # Keep the subtitle visible during the pause
+            self.subtitle_display.config(text=text)
+            
+            # Remove parentheses content and clean up
+            clean_text = re.sub(r'\([^)]*\)', '', text).strip()
+            # Remove punctuation and split into words
+            words = re.findall(r'\b[a-zA-Z]+\b', clean_text)
+            if words:
+                # For now, just show the first meaningful word
+                word_to_type = next((w for w in words if len(w) > 2), words[0] if words else "")
+                self.subtitle_label.config(text=f"Type this word: {word_to_type}")
+                print(f"DEBUG: Selected word: {word_to_type}")
+            else:
+                print(f"DEBUG: No words found in subtitle text: {text}")
+                # Skip this subtitle and continue
+                self.continue_playback()
         
     def continue_playback(self):
         if not self.player.is_playing():
             self.player.play()
             self.continue_button.config(state="disabled")
             self.subtitle_label.config(text="")
+            # Clear the subtitle display since we're moving on
+            self.subtitle_display.config(text="")
             
             # Set next pause time
             self.set_next_pause_time()
     
-    def get_current_subtitle(self):
-        # For now, return a placeholder - this will be enhanced to get actual subtitle text
-        return "[subtitle word]"
+    def extract_subtitles(self, video_path):
+        """Extract subtitles from video file using ffmpeg"""
+        try:
+            # Extract subtitles to SRT format
+            cmd = ['ffmpeg', '-i', video_path, '-map', '0:s:0', '-f', 'srt', '-']
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+            
+            if result.returncode == 0:
+                self.parse_srt(result.stdout)
+                print(f"Extracted {len(self.subtitles)} subtitle entries")
+            else:
+                print("Failed to extract subtitles")
+                
+        except Exception as e:
+            print(f"Error extracting subtitles: {e}")
+    
+    def parse_srt(self, srt_content):
+        """Parse SRT content into list of (start_ms, end_ms, text) tuples"""
+        self.subtitles = []
+        
+        # Split into subtitle blocks
+        blocks = re.split(r'\n\n+', srt_content.strip())
+        
+        for block in blocks:
+            lines = block.strip().split('\n')
+            if len(lines) >= 3:
+                # Parse timing line (e.g., "00:01:12,039 --> 00:01:14,074")
+                timing_match = re.match(r'(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})', lines[1])
+                if timing_match:
+                    # Convert to milliseconds
+                    start_ms = (int(timing_match.group(1)) * 3600000 +
+                              int(timing_match.group(2)) * 60000 +
+                              int(timing_match.group(3)) * 1000 +
+                              int(timing_match.group(4)))
+                    
+                    end_ms = (int(timing_match.group(5)) * 3600000 +
+                            int(timing_match.group(6)) * 60000 +
+                            int(timing_match.group(7)) * 1000 +
+                            int(timing_match.group(8)))
+                    
+                    # Join text lines
+                    text = ' '.join(lines[2:])
+                    self.subtitles.append((start_ms, end_ms, text))
+    
+    def update_subtitle_display(self, current_time):
+        """Update the subtitle display based on current playback time"""
+        # Find which subtitle should be displayed now
+        for i, (start_ms, end_ms, text) in enumerate(self.subtitles):
+            if start_ms <= current_time <= end_ms:
+                if i != self.subtitle_display_index:
+                    self.subtitle_display_index = i
+                    self.current_subtitle_text = text
+                    self.subtitle_display.config(text=text)
+                return
+        
+        # No subtitle should be displayed
+        if self.subtitle_display_index != -1:
+            self.subtitle_display_index = -1
+            self.current_subtitle_text = ""
+            self.subtitle_display.config(text="")
     
     def set_next_pause_time(self):
-        # For now, pause every 10 seconds as a demo
-        # This will be enhanced to use actual subtitle timings
-        if self.auto_pause_enabled:
-            current_time = self.player.get_time()
-            self.next_pause_time = current_time + 10000  # 10 seconds in milliseconds
+        """Set the next pause time based on subtitle timings"""
+        if self.auto_pause_enabled and self.current_subtitle_index < len(self.subtitles):
+            # Get end time of current subtitle and pause slightly before it
+            start_ms, end_ms, text = self.subtitles[self.current_subtitle_index]
+            self.next_pause_time = end_ms - self.pause_offset
+            print(f"DEBUG: Next pause at {self.next_pause_time}ms for subtitle #{self.current_subtitle_index}: {text[:30]}...")
+            self.current_subtitle_index += 1
+        else:
+            self.next_pause_time = None
+            print(f"DEBUG: No more subtitles to pause for")
     
     def on_close(self):
         self.player.stop()

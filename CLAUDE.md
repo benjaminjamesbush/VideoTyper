@@ -24,3 +24,17 @@ After discussing requirements (handling large video files, MKV support, embedded
 - Consider pysrt or webvtt-py for subtitle parsing
 - Use tkinter or PyQt5 for the UI
 - Focus on MVP first - no scoring, statistics, or difficulty settings initially
+
+## Important Debugging Notes
+
+- ALWAYS capture error output when running the video player: use `2>&1` to capture stderr
+- Example: `python video_player.py 2>&1`
+- CRITICAL: NEVER run the video player without `2>&1` - each run takes several minutes of user time
+- DO NOT WASTE USER TIME by forgetting to capture errors
+- ALWAYS RUN IN BACKGROUND with run_in_background=true - the player WILL crash/timeout/error
+- NEVER assume success from a timeout - that means it crashed and you lost the error
+- EVERY RUN WILL HAVE ERRORS - CAPTURE THEM PROPERLY
+- Example: Run with `2>&1` AND `run_in_background=true` ALWAYS
+- SAVE OUTPUT TO A FILE: `python video_player.py > output.log 2>&1` with run_in_background=true
+- THEN CHECK THE FILE AFTER: `cat output.log` to see the errors
+- DO NOT RUN WITHOUT SAVING TO FILE - YOU WILL LOSE THE OUTPUT
