@@ -48,9 +48,12 @@ class VideoPlayer:
         control_frame = ttk.Frame(self.root)
         control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         
-        ttk.Button(control_frame, text="Open Video", command=self.open_video).pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text="Play/Pause", command=self.play_pause).pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text="Stop", command=self.stop).pack(side=tk.LEFT, padx=5)
+        self.open_button = ttk.Button(control_frame, text="Open Video", command=self.open_video)
+        self.open_button.pack(side=tk.LEFT, padx=5)
+        self.play_button = ttk.Button(control_frame, text="Play/Pause", command=self.play_pause)
+        self.play_button.pack(side=tk.LEFT, padx=5)
+        self.stop_button = ttk.Button(control_frame, text="Stop", command=self.stop)
+        self.stop_button.pack(side=tk.LEFT, padx=5)
         
         # Row 1: Video frame (expands)
         self.video_frame = ttk.Frame(self.root, width=800, height=400)
@@ -101,15 +104,18 @@ class VideoPlayer:
             # Store the path for use after extraction
             self.pending_video_path = file_path
             
-            # Update UI to show loading status
-            self.subtitle_label.config(text="Extracting subtitles... Please wait...")
+            # Update UI to show loading status - make it very visible
+            self.subtitle_label.config(
+                text="⏳ EXTRACTING SUBTITLES... PLEASE WAIT (this may take 10-15 seconds)",
+                font=font.Font(size=16, weight="bold"),
+                foreground="red"
+            )
+            self.subtitle_display.config(text="Loading...", foreground="orange")
             
-            # Disable buttons during extraction
-            for child in self.root.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for button in child.winfo_children():
-                        if isinstance(button, ttk.Button):
-                            button.config(state="disabled")
+            # Hide buttons during extraction
+            self.open_button.pack_forget()
+            self.play_button.pack_forget()
+            self.stop_button.pack_forget()
             
             # Run extraction in background thread
             thread = threading.Thread(target=self.extract_subtitles_async, args=(file_path,))
@@ -130,15 +136,18 @@ class VideoPlayer:
             self.current_media = self.instance.media_new(self.pending_video_path)
             self.player.set_media(self.current_media)
             
-            # Clear status message
-            self.subtitle_label.config(text="")
+            # Clear status message and restore normal appearance
+            self.subtitle_label.config(
+                text="", 
+                font=font.Font(size=14),
+                foreground="blue"
+            )
+            self.subtitle_display.config(text="", foreground="white")
             
-            # Re-enable buttons
-            for child in self.root.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for button in child.winfo_children():
-                        if isinstance(button, ttk.Button):
-                            button.config(state="normal")
+            # Show buttons again
+            self.open_button.pack(side=tk.LEFT, padx=5)
+            self.play_button.pack(side=tk.LEFT, padx=5)
+            self.stop_button.pack(side=tk.LEFT, padx=5)
             
             # Enable auto-pause for typing practice
             self.auto_pause_enabled = True
