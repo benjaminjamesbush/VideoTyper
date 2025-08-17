@@ -20,12 +20,12 @@ class VideoPlayer:
         self.current_media = None
         self.is_user_seeking = False
         self.subtitles = []  # List of (start_ms, end_ms, text) tuples
-        self.current_subtitle_index = 0
         self.auto_pause_enabled = False
         self.next_pause_time = None
         self.pause_offset = 50  # Pause 50ms before subtitle ends (just for timing precision)
         self.current_subtitle_text = ""
         self.subtitle_display_index = -1
+        self.paused_subtitles = set()  # Track which subtitles we've already paused for
         
         self.setup_ui()
         
@@ -106,7 +106,7 @@ class VideoPlayer:
             
             # Enable auto-pause for typing practice
             self.auto_pause_enabled = True
-            self.current_subtitle_index = 0
+            self.paused_subtitles.clear()  # Clear paused subtitles for new video
             
             # Extract subtitles
             self.extract_subtitles(file_path)
@@ -129,10 +129,6 @@ class VideoPlayer:
         # Pause after loading tracks
         self.player.pause()
         
-        # Set first pause time if subtitles are available
-        if self.subtitles:
-            self.set_next_pause_time()
-        
         
     def on_seek(self, value):
         if self.is_user_seeking and self.player.get_media():
@@ -145,6 +141,13 @@ class VideoPlayer:
         if self.player.get_media():
             current_time = self.player.get_time()
             duration = self.player.get_length()
+            
+            # Debug: Log every 10th call to avoid spam
+            if not hasattr(self, 'update_counter'):
+                self.update_counter = 0
+            self.update_counter += 1
+            if self.update_counter % 10 == 0:
+                print(f"DEBUG: update_time called, current_time={current_time}ms")
             
             if duration > 0 and not self.is_user_seeking:
                 progress = (current_time / duration) * 100
@@ -173,16 +176,30 @@ class VideoPlayer:
     def pause_for_typing(self):
         self.player.pause()
         self.continue_button.config(state="normal")
+        
+        # Mark this subtitle as paused
+        if hasattr(self, 'next_pause_subtitle_index'):
+            self.paused_subtitles.add(self.next_pause_subtitle_index)
+            subtitle_index = self.next_pause_subtitle_index
+        else:
+            subtitle_index = self.subtitle_display_index
+            
         self.next_pause_time = None
         
         # Get current subtitle text and pick a word
-        # Note: current_subtitle_index was already incremented in set_next_pause_time
-        # so we need to use index - 1 to get the subtitle we just paused for
-        if self.current_subtitle_index > 0 and self.current_subtitle_index <= len(self.subtitles):
-            start_ms, end_ms, text = self.subtitles[self.current_subtitle_index - 1]
+        if 0 <= subtitle_index < len(self.subtitles):
+            start_ms, end_ms, text = self.subtitles[subtitle_index]
             current_time = self.player.get_time()
-            print(f"DEBUG: Paused at {current_time}ms for subtitle #{self.current_subtitle_index-1}")
+            print(f"DEBUG: Paused at {current_time}ms for subtitle #{subtitle_index}")
             print(f"DEBUG: Subtitle time: {start_ms}-{end_ms}ms, Text: {text[:50]}...")
+            
+            # Seek to midpoint of the subtitle interval
+            midpoint = (start_ms + end_ms) // 2
+            self.player.set_time(midpoint)
+            print(f"DEBUG: Seeked to midpoint {midpoint}ms")
+            
+            # Store the interval for replay on continue
+            self.replay_start = start_ms
             
             # Keep the subtitle visible during the pause
             self.subtitle_display.config(text=text)
@@ -203,14 +220,17 @@ class VideoPlayer:
         
     def continue_playback(self):
         if not self.player.is_playing():
+            # Seek to start of the interval for replay
+            if hasattr(self, 'replay_start'):
+                self.player.set_time(self.replay_start)
+                print(f"DEBUG: Replaying from {self.replay_start}ms")
+                delattr(self, 'replay_start')  # Clear for next time
+            
             self.player.play()
             self.continue_button.config(state="disabled")
             self.subtitle_label.config(text="")
             # Clear the subtitle display since we're moving on
             self.subtitle_display.config(text="")
-            
-            # Set next pause time
-            self.set_next_pause_time()
     
     def extract_subtitles(self, video_path):
         """Extract subtitles from video file using ffmpeg"""
@@ -261,29 +281,29 @@ class VideoPlayer:
         # Find which subtitle should be displayed now
         for i, (start_ms, end_ms, text) in enumerate(self.subtitles):
             if start_ms <= current_time <= end_ms:
+                # Always update display when we're in a subtitle's time range
                 if i != self.subtitle_display_index:
                     self.subtitle_display_index = i
-                    self.current_subtitle_text = text
-                    self.subtitle_display.config(text=text)
+                    print(f"DEBUG: Showing subtitle #{i} at {current_time}ms: {text[:30]}...")
+                
+                # Always set the text, not just when index changes
+                self.current_subtitle_text = text
+                self.subtitle_display.config(text=text)
+                
+                # Check if we need to set up a pause for this subtitle
+                # Do this EVERY update while in the subtitle, not just when it first appears
+                if self.auto_pause_enabled and i not in self.paused_subtitles and self.next_pause_time is None:
+                    self.next_pause_time = end_ms  # Pause at the end, no offset
+                    self.next_pause_subtitle_index = i
+                    print(f"DEBUG: Will pause at {self.next_pause_time}ms for subtitle #{i}")
                 return
         
         # No subtitle should be displayed
         if self.subtitle_display_index != -1:
+            print(f"DEBUG: Hiding subtitle #{self.subtitle_display_index} at {current_time}ms")
             self.subtitle_display_index = -1
             self.current_subtitle_text = ""
             self.subtitle_display.config(text="")
-    
-    def set_next_pause_time(self):
-        """Set the next pause time based on subtitle timings"""
-        if self.auto_pause_enabled and self.current_subtitle_index < len(self.subtitles):
-            # Get end time of current subtitle and pause slightly before it
-            start_ms, end_ms, text = self.subtitles[self.current_subtitle_index]
-            self.next_pause_time = end_ms - self.pause_offset
-            print(f"DEBUG: Next pause at {self.next_pause_time}ms for subtitle #{self.current_subtitle_index}: {text[:30]}...")
-            self.current_subtitle_index += 1
-        else:
-            self.next_pause_time = None
-            print(f"DEBUG: No more subtitles to pause for")
     
     def on_close(self):
         self.player.stop()
