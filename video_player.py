@@ -186,9 +186,21 @@ class VideoPlayer:
             
         self.next_pause_time = None
         
-        # Get current subtitle text and pick a word
+        # Get current subtitle text and check if it has words
         if 0 <= subtitle_index < len(self.subtitles):
             start_ms, end_ms, text = self.subtitles[subtitle_index]
+            
+            # Check if subtitle has actual words to type
+            clean_text = re.sub(r'\([^)]*\)', '', text).strip()
+            words = re.findall(r'\b[a-zA-Z]+\b', clean_text)
+            
+            if not words:
+                # No words - just continue without pausing
+                print(f"DEBUG: Skipping subtitle #{subtitle_index} (no words): {text}")
+                self.player.play()
+                self.continue_button.config(state="disabled")
+                return
+            
             current_time = self.player.get_time()
             print(f"DEBUG: Paused at {current_time}ms for subtitle #{subtitle_index}")
             print(f"DEBUG: Subtitle time: {start_ms}-{end_ms}ms, Text: {text[:50]}...")
@@ -204,19 +216,10 @@ class VideoPlayer:
             # Keep the subtitle visible during the pause
             self.subtitle_display.config(text=text)
             
-            # Remove parentheses content and clean up
-            clean_text = re.sub(r'\([^)]*\)', '', text).strip()
-            # Remove punctuation and split into words
-            words = re.findall(r'\b[a-zA-Z]+\b', clean_text)
-            if words:
-                # For now, just show the first meaningful word
-                word_to_type = next((w for w in words if len(w) > 2), words[0] if words else "")
-                self.subtitle_label.config(text=f"Type this word: {word_to_type}")
-                print(f"DEBUG: Selected word: {word_to_type}")
-            else:
-                print(f"DEBUG: No words found in subtitle text: {text}")
-                # Skip this subtitle and continue
-                self.continue_playback()
+            # Show the word to type
+            word_to_type = next((w for w in words if len(w) > 2), words[0] if words else "")
+            self.subtitle_label.config(text=f"Type this word: {word_to_type}")
+            print(f"DEBUG: Selected word: {word_to_type}")
         
     def continue_playback(self):
         if not self.player.is_playing():
