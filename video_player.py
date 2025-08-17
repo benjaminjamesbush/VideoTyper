@@ -8,6 +8,7 @@ import time
 import subprocess
 import json
 import re
+import threading
 
 class VideoPlayer:
     def __init__(self, root):
@@ -97,38 +98,66 @@ class VideoPlayer:
             )
         
         if file_path:
-            self.current_media = self.instance.media_new(file_path)
+            # Store the path for use after extraction
+            self.pending_video_path = file_path
+            
+            # Update UI to show loading status
+            self.subtitle_label.config(text="Extracting subtitles... Please wait...")
+            
+            # Disable buttons during extraction
+            for child in self.root.winfo_children():
+                if isinstance(child, ttk.Frame):
+                    for button in child.winfo_children():
+                        if isinstance(button, ttk.Button):
+                            button.config(state="disabled")
+            
+            # Run extraction in background thread
+            thread = threading.Thread(target=self.extract_subtitles_async, args=(file_path,))
+            thread.daemon = True
+            thread.start()
+    
+    def extract_subtitles_async(self, file_path):
+        """Extract subtitles in background thread"""
+        self.extract_subtitles(file_path)
+        
+        # Schedule the video loading on the main thread
+        self.root.after(0, self.finish_loading_video)
+    
+    def finish_loading_video(self):
+        """Complete video loading after subtitle extraction (runs on main thread)"""
+        if hasattr(self, 'pending_video_path'):
+            # Now load the video
+            self.current_media = self.instance.media_new(self.pending_video_path)
             self.player.set_media(self.current_media)
             
-            # Start playing briefly to load track info, then pause
-            self.player.play()
-            self.root.after(500, self.load_subtitle_tracks)
+            # Clear status message
+            self.subtitle_label.config(text="")
+            
+            # Re-enable buttons
+            for child in self.root.winfo_children():
+                if isinstance(child, ttk.Frame):
+                    for button in child.winfo_children():
+                        if isinstance(button, ttk.Button):
+                            button.config(state="normal")
             
             # Enable auto-pause for typing practice
             self.auto_pause_enabled = True
             self.paused_subtitles.clear()  # Clear paused subtitles for new video
             
-            # Extract subtitles
-            self.extract_subtitles(file_path)
-            
-            print(f"Loaded video: {Path(file_path).name}")
+            print(f"Loaded video: {Path(self.pending_video_path).name} with {len(self.subtitles)} subtitles")
+            delattr(self, 'pending_video_path')
             
     def play_pause(self):
         if self.player.is_playing():
             self.player.pause()
         else:
             self.player.play()
+            # Disable VLC subtitles on first play
+            if self.player.video_get_spu() != -1:
+                self.player.video_set_spu(-1)
             
     def stop(self):
         self.player.stop()
-        
-    def load_subtitle_tracks(self):
-        # Disable VLC's subtitle rendering - we'll handle it ourselves
-        self.player.video_set_spu(-1)
-        
-        # Pause after loading tracks
-        self.player.pause()
-        
         
     def on_seek(self, value):
         if self.is_user_seeking and self.player.get_media():
