@@ -12,6 +12,7 @@ import random
 import threading
 import pyttsx3
 import queue
+import pygame
 
 class VideoPlayer:
     def __init__(self, root):
@@ -35,6 +36,11 @@ class VideoPlayer:
         self.tts_queue = queue.Queue()
         self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
         self.tts_thread.start()
+        
+        # Initialize pygame mixer for letter sounds
+        pygame.mixer.init()
+        self.letter_sounds = {}
+        self.load_letter_sounds()
         
         self.setup_ui()
         
@@ -388,6 +394,10 @@ class VideoPlayer:
             self.typing_entry.delete(0, tk.END)
             self.typing_entry.insert(0, correct_text)
             
+            # Speak the letter that was just typed
+            print(f"DEBUG: Speaking typed letter: {expected_char}")
+            self.speak_letter(expected_char)
+            
             # Reset hint timer since user typed a correct letter
             self.schedule_hint()
             
@@ -503,6 +513,30 @@ class VideoPlayer:
             self.current_subtitle_text = ""
             self.subtitle_display.config(text="")
     
+    def load_letter_sounds(self):
+        """Load all letter WAV files into memory"""
+        sound_dir = Path("letter_sounds")
+        if not sound_dir.exists():
+            print("Warning: letter_sounds directory not found")
+            return
+        
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            wav_file = sound_dir / f"{letter}.wav"
+            if wav_file.exists():
+                try:
+                    self.letter_sounds[letter.upper()] = pygame.mixer.Sound(str(wav_file))
+                except Exception as e:
+                    print(f"Error loading {letter}.wav: {e}")
+    
+    def play_letter_sound(self, letter):
+        """Play the sound for a given letter"""
+        letter_upper = letter.upper()
+        if letter_upper in self.letter_sounds:
+            try:
+                self.letter_sounds[letter_upper].play()
+            except Exception as e:
+                print(f"Error playing letter sound {letter}: {e}")
+    
     def _tts_worker(self):
         """Worker thread for TTS - processes words from queue"""
         try:
@@ -527,6 +561,7 @@ class VideoPlayer:
                 if word is None:  # Sentinel value to stop thread
                     break
                     
+                print(f"DEBUG: TTS processing: '{word}'")
                 engine.say(word)
                 # Use startLoop/iterate/endLoop instead of runAndWait() for threading
                 engine.startLoop(False)  # False = don't use internal event loop
@@ -539,9 +574,14 @@ class VideoPlayer:
                 print(f"ERROR: TTS failed to speak '{word}': {e}")
                 sys.exit(1)
     
+    
     def speak_word(self, word):
         """Queue a word to be spoken by TTS"""
         self.tts_queue.put(word)
+    
+    def speak_letter(self, letter):
+        """Play the sound for the typed letter"""
+        self.play_letter_sound(letter)
     
     def schedule_hint(self):
         """Schedule a hint to be spoken after 2 seconds"""
