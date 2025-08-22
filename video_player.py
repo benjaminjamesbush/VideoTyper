@@ -77,11 +77,15 @@ class VideoPlayer:
         subtitle_frame = ttk.Frame(self.root)
         subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
         
-        self.subtitle_display = ttk.Label(subtitle_frame, text="", font=font.Font(size=48), foreground="white", background="black")
+        # Use Text widget for rich formatting support
+        self.subtitle_display = tk.Text(subtitle_frame, height=2, wrap=tk.WORD, 
+                                       font=font.Font(size=48), foreground="white", 
+                                       background="black", relief=tk.FLAT, state='disabled')
         self.subtitle_display.pack(pady=5)
         
-        self.subtitle_label = ttk.Label(subtitle_frame, text="", font=font.Font(size=42), foreground="blue")
-        self.subtitle_label.pack(pady=5)
+        # Configure tags for highlighting
+        self.subtitle_display.tag_configure("highlight", foreground="yellow", 
+                                           font=font.Font(size=48, weight="bold"))
         
         # Text input field for typing practice
         self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=42), width=30, justify='center')
@@ -116,7 +120,6 @@ class VideoPlayer:
             self.typing_entry.config(state='disabled')  # Disable to prevent input
             self.typing_entry.unbind('<KeyRelease>')
             self.play_button.config(state="normal")
-            self.subtitle_label.config(text="")
             
         if file_path is None:
             file_path = filedialog.askopenfilename(
@@ -132,12 +135,8 @@ class VideoPlayer:
             self.pending_video_path = file_path
             
             # Update UI to show loading status - make it very visible
-            self.subtitle_label.config(
-                text="⏳ EXTRACTING SUBTITLES... PLEASE WAIT (this may take 10-15 seconds)",
-                font=font.Font(size=48, weight="bold"),
-                foreground="red"
-            )
-            self.subtitle_display.config(text="Loading...", foreground="orange")
+            self.set_subtitle_text("⏳ EXTRACTING SUBTITLES... PLEASE WAIT (this may take 10-15 seconds)")
+            self.set_subtitle_text("Loading...")
             
             # Hide buttons during extraction
             self.open_button.pack_forget()
@@ -164,12 +163,7 @@ class VideoPlayer:
             self.player.set_media(self.current_media)
             
             # Clear status message and restore normal appearance
-            self.subtitle_label.config(
-                text="", 
-                font=font.Font(size=42),
-                foreground="blue"
-            )
-            self.subtitle_display.config(text="", foreground="white")
+            self.set_subtitle_text("")
             
             # Show buttons again
             self.open_button.pack(side=tk.LEFT, padx=5)
@@ -217,7 +211,6 @@ class VideoPlayer:
             self.typing_entry.config(state='disabled')  # Disable to prevent input
             self.typing_entry.unbind('<KeyRelease>')
             self.play_button.config(state="normal")
-            self.subtitle_label.config(text="")
             
         # Reset pause-related state
         self.next_pause_time = None
@@ -347,7 +340,7 @@ class VideoPlayer:
             self.replay_start = start_ms
             
             # Keep the subtitle visible during the pause
-            self.subtitle_display.config(text=text)
+            self.set_subtitle_text(text)
             
             # Show the word to type - randomly select from available words
             if words:
@@ -360,7 +353,13 @@ class VideoPlayer:
             else:
                 word_to_type = ""
             
-            self.subtitle_label.config(text=f"Type this word: {word_to_type}")
+            # Store the word to highlight for continuous updates
+            self.highlight_word = word_to_type if word_to_type else None
+            
+            # Apply initial highlighting
+            if self.highlight_word:
+                self.set_subtitle_text(text, self.highlight_word)
+            
             print(f"DEBUG: Selected word: {word_to_type} from pool: {word_pool if words else []}")
             
             # Speak the word using TTS
@@ -433,6 +432,7 @@ class VideoPlayer:
             # Re-enable the play button and clear typing flag
             self.play_button.config(state="normal")
             self.typing_in_progress = False
+            self.highlight_word = None  # Clear the highlighting
             
             # Seek to start of the interval for replay
             if hasattr(self, 'replay_start'):
@@ -445,9 +445,8 @@ class VideoPlayer:
             self.auto_pause_enabled = True
             
             self.player.play()
-            self.subtitle_label.config(text="")
             # Clear the subtitle display since we're moving on
-            self.subtitle_display.config(text="")
+            self.set_subtitle_text("")
     
     def extract_subtitles(self, video_path):
         """Extract subtitles from video file using ffmpeg"""
@@ -505,7 +504,12 @@ class VideoPlayer:
                 
                 # Always set the text, not just when index changes
                 self.current_subtitle_text = text
-                self.subtitle_display.config(text=text)
+                
+                # Apply highlighting if we're in typing mode
+                if hasattr(self, 'highlight_word') and self.highlight_word:
+                    self.set_subtitle_text(text, self.highlight_word)
+                else:
+                    self.set_subtitle_text(text)
                 
                 # Check if we need to set up a pause for this subtitle
                 # Do this EVERY update while in the subtitle, not just when it first appears
@@ -520,7 +524,38 @@ class VideoPlayer:
             print(f"DEBUG: Hiding subtitle #{self.subtitle_display_index} at {current_time}ms")
             self.subtitle_display_index = -1
             self.current_subtitle_text = ""
-            self.subtitle_display.config(text="")
+            self.set_subtitle_text("")
+    
+    def set_subtitle_text(self, text, highlight_word=None):
+        """Update subtitle display with optional word highlighting"""
+        self.subtitle_display.config(state='normal')
+        self.subtitle_display.delete('1.0', tk.END)
+        
+        if highlight_word and text:
+            # Find all occurrences of the word to highlight
+            import re
+            pattern = r'\b' + re.escape(highlight_word) + r'\b'
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            
+            if matches:
+                # Insert text with highlighting
+                last_end = 0
+                for match in matches:
+                    # Insert text before the match
+                    if match.start() > last_end:
+                        self.subtitle_display.insert(tk.END, text[last_end:match.start()])
+                    # Insert the highlighted word in uppercase
+                    self.subtitle_display.insert(tk.END, highlight_word.upper(), "highlight")
+                    last_end = match.end()
+                # Insert any remaining text
+                if last_end < len(text):
+                    self.subtitle_display.insert(tk.END, text[last_end:])
+            else:
+                self.subtitle_display.insert(tk.END, text)
+        else:
+            self.subtitle_display.insert(tk.END, text if text else "")
+        
+        self.subtitle_display.config(state='disabled')
     
     def load_letter_sounds(self):
         """Load all letter WAV files into memory"""
