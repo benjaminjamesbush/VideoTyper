@@ -367,6 +367,9 @@ class VideoPlayer:
             
             # Also disable the play button
             self.play_button.config(state="disabled")
+            
+            # Start hint system - speak next letter after 5 seconds
+            self.schedule_hint()
         
     def validate_keystroke(self, event):
         """Validate each keystroke and only accept correct letters"""
@@ -385,9 +388,13 @@ class VideoPlayer:
             self.typing_entry.delete(0, tk.END)
             self.typing_entry.insert(0, correct_text)
             
+            # Reset hint timer since user typed a correct letter
+            self.schedule_hint()
+            
             # Check if word is complete
             if self.current_position >= len(self.target_word):
                 print(f"DEBUG: Word complete: {self.target_word}")
+                self.cancel_hints()  # Cancel any pending hints
                 self.typing_entry.unbind('<KeyRelease>')  # Unbind to prevent further input
                 self.root.after(100, self.continue_playback)  # Small delay before continuing
         else:
@@ -398,6 +405,9 @@ class VideoPlayer:
     
     def continue_playback(self):
         if not self.player.is_playing():
+            # Cancel any pending hints
+            self.cancel_hints()
+            
             # Hide the typing entry
             self.typing_entry.pack_forget()
             
@@ -532,6 +542,30 @@ class VideoPlayer:
     def speak_word(self, word):
         """Queue a word to be spoken by TTS"""
         self.tts_queue.put(word)
+    
+    def schedule_hint(self):
+        """Schedule a hint to be spoken after 2 seconds"""
+        if hasattr(self, 'hint_timer'):
+            self.root.after_cancel(self.hint_timer)  # Cancel any existing timer
+        
+        # Schedule hint after 2 seconds (2000ms)
+        self.hint_timer = self.root.after(2000, self.give_hint)
+    
+    def give_hint(self):
+        """Speak the next letter the user needs to type"""
+        if self.current_position < len(self.target_word):
+            next_letter = self.target_word[self.current_position]
+            hint_text = f"Type {next_letter}"
+            self.speak_word(hint_text)
+            
+            # Schedule the next hint in 5 seconds
+            self.schedule_hint()
+    
+    def cancel_hints(self):
+        """Cancel any pending hints"""
+        if hasattr(self, 'hint_timer'):
+            self.root.after_cancel(self.hint_timer)
+            delattr(self, 'hint_timer')
     
     def on_close(self):
         self.player.stop()
