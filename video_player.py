@@ -87,6 +87,8 @@ class VideoPlayer:
         self.subtitle_display.tag_configure("center", justify='center')
         self.subtitle_display.tag_configure("highlight", foreground="yellow", 
                                            font=font.Font(size=48, weight="bold"), justify='center')
+        self.subtitle_display.tag_configure("next_letter", foreground="red", underline=True,
+                                           font=font.Font(size=48, weight="bold"), justify='center')
         
         # Text input field for typing practice
         self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=42), width=30, justify='center')
@@ -357,9 +359,9 @@ class VideoPlayer:
             # Store the word to highlight for continuous updates
             self.highlight_word = word_to_type if word_to_type else None
             
-            # Apply initial highlighting
+            # Apply initial highlighting with first letter marked
             if self.highlight_word:
-                self.set_subtitle_text(text, self.highlight_word)
+                self.set_subtitle_text(text, self.highlight_word, self.current_position)
             
             print(f"DEBUG: Selected word: {word_to_type} from pool: {word_pool if words else []}")
             
@@ -399,6 +401,10 @@ class VideoPlayer:
             correct_text = self.target_word[:self.current_position]
             self.typing_entry.delete(0, tk.END)
             self.typing_entry.insert(0, correct_text)
+            
+            # Update subtitle display to show next letter in red
+            if hasattr(self, 'current_subtitle_text') and self.current_subtitle_text:
+                self.set_subtitle_text(self.current_subtitle_text, self.highlight_word, self.current_position)
             
             # Speak the letter that was just typed
             print(f"DEBUG: Speaking typed letter: {expected_char}")
@@ -508,7 +514,9 @@ class VideoPlayer:
                 
                 # Apply highlighting if we're in typing mode
                 if hasattr(self, 'highlight_word') and self.highlight_word:
-                    self.set_subtitle_text(text, self.highlight_word)
+                    # Pass current position if actively typing
+                    pos = self.current_position if hasattr(self, 'current_position') else None
+                    self.set_subtitle_text(text, self.highlight_word, pos)
                 else:
                     self.set_subtitle_text(text)
                 
@@ -527,8 +535,8 @@ class VideoPlayer:
             self.current_subtitle_text = ""
             self.set_subtitle_text("")
     
-    def set_subtitle_text(self, text, highlight_word=None):
-        """Update subtitle display with optional word highlighting"""
+    def set_subtitle_text(self, text, highlight_word=None, next_letter_pos=None):
+        """Update subtitle display with optional word highlighting and next letter indicator"""
         self.subtitle_display.config(state='normal')
         self.subtitle_display.delete('1.0', tk.END)
         
@@ -549,8 +557,22 @@ class VideoPlayer:
                     # Insert text before the match
                     if match.start() > last_end:
                         self.subtitle_display.insert(tk.END, text[last_end:match.start()], "center")
-                    # Insert the highlighted word in uppercase
-                    self.subtitle_display.insert(tk.END, highlight_word.upper(), "highlight")
+                    
+                    # Insert the highlighted word in uppercase with next letter marked
+                    word_upper = highlight_word.upper()
+                    if next_letter_pos is not None and next_letter_pos < len(word_upper):
+                        # Insert the part already typed
+                        if next_letter_pos > 0:
+                            self.subtitle_display.insert(tk.END, word_upper[:next_letter_pos], "highlight")
+                        # Insert the next letter to type in red
+                        self.subtitle_display.insert(tk.END, word_upper[next_letter_pos], "next_letter")
+                        # Insert the remaining letters
+                        if next_letter_pos + 1 < len(word_upper):
+                            self.subtitle_display.insert(tk.END, word_upper[next_letter_pos + 1:], "highlight")
+                    else:
+                        # No active typing or word complete - show entire word highlighted
+                        self.subtitle_display.insert(tk.END, word_upper, "highlight")
+                    
                     last_end = match.end()
                 # Insert any remaining text
                 if last_end < len(text):
