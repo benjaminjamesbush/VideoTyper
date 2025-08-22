@@ -35,7 +35,6 @@ class VideoPlayer:
         self.tts_queue = queue.Queue()
         self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
         self.tts_thread.start()
-        print("TTS system initialized successfully")
         
         self.setup_ui()
         
@@ -496,68 +495,48 @@ class VideoPlayer:
     
     def _tts_worker(self):
         """Worker thread for TTS - processes words from queue"""
-        print("DEBUG: TTS worker thread starting")
-        print(f"DEBUG: Thread info - main thread: {threading.main_thread()}, current thread: {threading.current_thread()}")
         try:
             engine = pyttsx3.init()
             engine.setProperty('rate', 150)  # Speed of speech
             engine.setProperty('volume', 0.9)  # Volume level
-            print(f"DEBUG: TTS engine created in worker thread, driver name: {engine._driver_name if hasattr(engine, '_driver_name') else 'unknown'}")
+            
+            # Prime the engine with a dummy word to work around pyttsx3 bug
+            engine.say("ready")
+            engine.startLoop(False)
+            engine.iterate()
+            engine.endLoop()
+            
+            print("TTS: Engine ready")
         except Exception as e:
-            print(f"ERROR: Failed to initialize TTS engine in worker thread: {e}")
+            print(f"ERROR: Failed to initialize TTS engine: {e}")
             sys.exit(1)
             
         word_count = 0
         while True:
             try:
-                print(f"DEBUG: TTS worker about to call queue.get() (processed {word_count} so far)")
-                print(f"DEBUG: Queue empty? {self.tts_queue.empty()}, Queue size: ~{self.tts_queue.qsize()}")
-                word = self.tts_queue.get(timeout=1.0)  # Add timeout to see if we're stuck
-                print(f"DEBUG: TTS worker got word from queue: '{word}'")
+                word = self.tts_queue.get(timeout=1.0)
                 
                 if word is None:  # Sentinel value to stop thread
-                    print("DEBUG: TTS worker received stop signal")
                     break
-                    
+                
                 word_count += 1
-                print(f"DEBUG: TTS starting to speak word #{word_count}: '{word}'")
-                
-                # Log engine internals
-                print(f"DEBUG: Before word #{word_count}: engine._inLoop={getattr(engine, '_inLoop', 'N/A')}, proxy={engine.proxy}")
-                
-                print(f"DEBUG: About to call engine.say('{word}')")
+                print(f"TTS: Speaking word #{word_count}: {word}")
+                    
                 engine.say(word)
-                print(f"DEBUG: After say(): engine._inLoop={getattr(engine, '_inLoop', 'N/A')}")
-                
                 # Use startLoop/iterate/endLoop instead of runAndWait() for threading
-                print(f"DEBUG: About to process speech for '{word}'")
                 engine.startLoop(False)  # False = don't use internal event loop
-                engine.iterate()  # Process the speech
+                engine.iterate()
                 engine.endLoop()
-                print(f"DEBUG: After speech processing: engine._inLoop={getattr(engine, '_inLoop', 'N/A')}")
-                
-                # Don't call stop() - it breaks the engine on Windows
-                # print(f"DEBUG: About to call engine.stop() for '{word}'")
-                # engine.stop()
-                # print(f"DEBUG: After stop(): engine._inLoop={getattr(engine, '_inLoop', 'N/A')}")
-                
-                print(f"DEBUG: TTS finished speaking word #{word_count}: '{word}'")
                 
             except queue.Empty:
-                print(f"DEBUG: TTS worker timeout - queue was empty")
                 continue
             except Exception as e:
-                print(f"ERROR: TTS failed to speak word #{word_count} '{word}': {e}")
-                print(f"ERROR: Exception type: {type(e).__name__}")
-                import traceback
-                traceback.print_exc()
+                print(f"ERROR: TTS failed to speak '{word}': {e}")
                 sys.exit(1)
     
     def speak_word(self, word):
         """Queue a word to be spoken by TTS"""
-        print(f"DEBUG: Queueing word for TTS: '{word}'")
         self.tts_queue.put(word)
-        print(f"DEBUG: Word '{word}' added to queue (queue size: ~{self.tts_queue.qsize()})")
     
     def on_close(self):
         self.player.stop()
