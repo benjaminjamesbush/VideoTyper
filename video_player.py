@@ -347,9 +347,11 @@ class VideoPlayer:
             
             # Show the word to type - randomly select from available words
             if words:
-                # Filter for words longer than 2 chars if available, otherwise use all words
-                longer_words = [w for w in words if len(w) > 2]
-                word_pool = longer_words if longer_words else words
+                # Filter for words longer than 2 chars and no apostrophes
+                # Avoid fragments like "couldn" from "couldn't"
+                clean_words = [w for w in words if "'" not in text[max(0, text.find(w)-1):text.find(w)+len(w)+1]]
+                longer_words = [w for w in clean_words if len(w) > 2]
+                word_pool = longer_words if longer_words else clean_words if clean_words else words
                 word_to_type = random.choice(word_pool)
             else:
                 word_to_type = ""
