@@ -70,8 +70,10 @@ class VideoPlayer:
         self.subtitle_label = ttk.Label(subtitle_frame, text="", font=font.Font(size=14), foreground="blue")
         self.subtitle_label.pack(pady=5)
         
-        self.continue_button = ttk.Button(subtitle_frame, text="Continue (Enter)", command=self.continue_playback, state="disabled")
-        self.continue_button.pack(pady=5)
+        # Text input field for typing practice
+        self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=14), width=30)
+        self.typing_entry.pack(pady=5)
+        self.typing_entry.pack_forget()  # Initially hidden
         
         # Row 3: Progress bar
         self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
@@ -81,8 +83,9 @@ class VideoPlayer:
         self.time_label = ttk.Label(self.root, text="00:00 / 00:00")
         self.time_label.grid(row=4, column=0, pady=5)
         
-        # Bind Enter key to continue
-        self.root.bind('<Return>', lambda e: self.continue_playback())
+        # Typing-related variables
+        self.target_word = ""
+        self.current_position = 0
         
         self.progress_bar.bind("<ButtonPress-1>", lambda e: setattr(self, 'is_user_seeking', True))
         self.progress_bar.bind("<ButtonRelease-1>", lambda e: setattr(self, 'is_user_seeking', False))
@@ -214,7 +217,6 @@ class VideoPlayer:
         
     def pause_for_typing(self):
         self.player.pause()
-        self.continue_button.config(state="normal")
         
         # Mark this subtitle as paused
         if hasattr(self, 'next_pause_subtitle_index'):
@@ -237,7 +239,6 @@ class VideoPlayer:
                 # No words - just continue without pausing
                 print(f"DEBUG: Skipping subtitle #{subtitle_index} (no words): {text}")
                 self.player.play()
-                self.continue_button.config(state="disabled")
                 return
             
             current_time = self.player.get_time()
@@ -266,17 +267,61 @@ class VideoPlayer:
             
             self.subtitle_label.config(text=f"Type this word: {word_to_type}")
             print(f"DEBUG: Selected word: {word_to_type} from pool: {word_pool if words else []}")
+            
+            # Set up typing input
+            self.target_word = word_to_type.upper()  # Store in uppercase for comparison
+            self.current_position = 0
+            self.typing_entry.delete(0, tk.END)  # Clear any previous text
+            self.typing_entry.pack()  # Show the input field
+            self.typing_entry.focus_set()  # Auto-focus for immediate typing
+            
+            # Bind the key validation
+            self.typing_entry.bind('<KeyRelease>', self.validate_keystroke)
         
+    def validate_keystroke(self, event):
+        """Validate each keystroke and only accept correct letters"""
+        if self.current_position >= len(self.target_word):
+            return  # Already complete
+        
+        # Get the last typed character
+        typed_char = event.char.upper()
+        expected_char = self.target_word[self.current_position]
+        
+        # Check if it matches the expected character
+        if typed_char == expected_char:
+            # Update the entry to show only correct letters typed so far
+            self.current_position += 1
+            correct_text = self.target_word[:self.current_position]
+            self.typing_entry.delete(0, tk.END)
+            self.typing_entry.insert(0, correct_text)
+            
+            # Check if word is complete
+            if self.current_position >= len(self.target_word):
+                print(f"DEBUG: Word complete: {self.target_word}")
+                self.typing_entry.unbind('<KeyRelease>')  # Unbind to prevent further input
+                self.root.after(100, self.continue_playback)  # Small delay before continuing
+        else:
+            # Wrong key - remove it from the entry
+            correct_text = self.target_word[:self.current_position]
+            self.typing_entry.delete(0, tk.END)
+            self.typing_entry.insert(0, correct_text)
+    
     def continue_playback(self):
         if not self.player.is_playing():
+            # Hide the typing entry
+            self.typing_entry.pack_forget()
+            
             # Seek to start of the interval for replay
             if hasattr(self, 'replay_start'):
                 self.player.set_time(self.replay_start)
                 print(f"DEBUG: Replaying from {self.replay_start}ms")
                 delattr(self, 'replay_start')  # Clear for next time
             
+            # Reset pause detection to allow next subtitle to trigger
+            self.next_pause_time = None
+            self.auto_pause_enabled = True
+            
             self.player.play()
-            self.continue_button.config(state="disabled")
             self.subtitle_label.config(text="")
             # Clear the subtitle display since we're moving on
             self.subtitle_display.config(text="")
