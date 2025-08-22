@@ -8,6 +8,7 @@ import time
 import subprocess
 import json
 import re
+import random
 import threading
 
 class VideoPlayer:
@@ -254,10 +255,17 @@ class VideoPlayer:
             # Keep the subtitle visible during the pause
             self.subtitle_display.config(text=text)
             
-            # Show the word to type
-            word_to_type = next((w for w in words if len(w) > 2), words[0] if words else "")
+            # Show the word to type - randomly select from available words
+            if words:
+                # Filter for words longer than 2 chars if available, otherwise use all words
+                longer_words = [w for w in words if len(w) > 2]
+                word_pool = longer_words if longer_words else words
+                word_to_type = random.choice(word_pool)
+            else:
+                word_to_type = ""
+            
             self.subtitle_label.config(text=f"Type this word: {word_to_type}")
-            print(f"DEBUG: Selected word: {word_to_type}")
+            print(f"DEBUG: Selected word: {word_to_type} from pool: {word_pool if words else []}")
         
     def continue_playback(self):
         if not self.player.is_playing():
