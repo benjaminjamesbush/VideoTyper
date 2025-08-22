@@ -77,16 +77,16 @@ class VideoPlayer:
         subtitle_frame = ttk.Frame(self.root)
         subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
         
-        self.subtitle_display = ttk.Label(subtitle_frame, text="", font=font.Font(size=16), foreground="white", background="black")
+        self.subtitle_display = ttk.Label(subtitle_frame, text="", font=font.Font(size=48), foreground="white", background="black")
         self.subtitle_display.pack(pady=5)
         
-        self.subtitle_label = ttk.Label(subtitle_frame, text="", font=font.Font(size=14), foreground="blue")
+        self.subtitle_label = ttk.Label(subtitle_frame, text="", font=font.Font(size=42), foreground="blue")
         self.subtitle_label.pack(pady=5)
         
         # Text input field for typing practice
-        self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=14), width=30)
-        self.typing_entry.pack(pady=5)
-        self.typing_entry.pack_forget()  # Initially hidden
+        self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=42), width=30, justify='center')
+        self.typing_entry.pack(pady=5)  # Always visible to prevent layout jumps
+        self.typing_entry.config(state='disabled')  # Initially disabled
         
         # Row 3: Progress bar
         self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
@@ -111,7 +111,9 @@ class VideoPlayer:
         # Reset typing state if we were in the middle of typing
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
             self.typing_in_progress = False
-            self.typing_entry.pack_forget()
+            self.typing_entry.config(state='normal')
+            self.typing_entry.delete(0, tk.END)  # Clear instead of hiding
+            self.typing_entry.config(state='disabled')  # Disable to prevent input
             self.typing_entry.unbind('<KeyRelease>')
             self.play_button.config(state="normal")
             self.subtitle_label.config(text="")
@@ -132,7 +134,7 @@ class VideoPlayer:
             # Update UI to show loading status - make it very visible
             self.subtitle_label.config(
                 text="⏳ EXTRACTING SUBTITLES... PLEASE WAIT (this may take 10-15 seconds)",
-                font=font.Font(size=16, weight="bold"),
+                font=font.Font(size=48, weight="bold"),
                 foreground="red"
             )
             self.subtitle_display.config(text="Loading...", foreground="orange")
@@ -164,7 +166,7 @@ class VideoPlayer:
             # Clear status message and restore normal appearance
             self.subtitle_label.config(
                 text="", 
-                font=font.Font(size=14),
+                font=font.Font(size=42),
                 foreground="blue"
             )
             self.subtitle_display.config(text="", foreground="white")
@@ -210,7 +212,9 @@ class VideoPlayer:
         # Reset typing state if we were in the middle of typing
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
             self.typing_in_progress = False
-            self.typing_entry.pack_forget()
+            self.typing_entry.config(state='normal')
+            self.typing_entry.delete(0, tk.END)  # Clear instead of hiding
+            self.typing_entry.config(state='disabled')  # Disable to prevent input
             self.typing_entry.unbind('<KeyRelease>')
             self.play_button.config(state="normal")
             self.subtitle_label.config(text="")
@@ -366,8 +370,8 @@ class VideoPlayer:
             # Set up typing input
             self.target_word = word_to_type.upper()  # Store in uppercase for comparison
             self.current_position = 0
+            self.typing_entry.config(state='normal')  # Enable for input
             self.typing_entry.delete(0, tk.END)  # Clear any previous text
-            self.typing_entry.pack()  # Show the input field
             self.typing_entry.focus_set()  # Auto-focus for immediate typing
             
             # Bind the key validation
@@ -408,6 +412,7 @@ class VideoPlayer:
                 print(f"DEBUG: Word complete: {self.target_word}")
                 self.cancel_hints()  # Cancel any pending hints
                 self.typing_entry.unbind('<KeyRelease>')  # Unbind to prevent further input
+                self.typing_entry.config(state='disabled')  # Disable after completion
                 self.root.after(100, self.continue_playback)  # Small delay before continuing
         else:
             # Wrong key - remove it from the entry
@@ -420,8 +425,10 @@ class VideoPlayer:
             # Cancel any pending hints
             self.cancel_hints()
             
-            # Hide the typing entry
-            self.typing_entry.pack_forget()
+            # Clear and disable the typing entry
+            self.typing_entry.config(state='normal')
+            self.typing_entry.delete(0, tk.END)
+            self.typing_entry.config(state='disabled')
             
             # Re-enable the play button and clear typing flag
             self.play_button.config(state="normal")
