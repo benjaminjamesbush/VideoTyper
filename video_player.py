@@ -87,8 +87,8 @@ class VideoPlayer:
         self.target_word = ""
         self.current_position = 0
         
-        self.progress_bar.bind("<ButtonPress-1>", lambda e: setattr(self, 'is_user_seeking', True))
-        self.progress_bar.bind("<ButtonRelease-1>", lambda e: setattr(self, 'is_user_seeking', False))
+        self.progress_bar.bind("<ButtonPress-1>", self.on_seek_start)
+        self.progress_bar.bind("<ButtonRelease-1>", self.on_seek_end)
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
@@ -200,12 +200,52 @@ class VideoPlayer:
         self.next_pause_time = None
         # Don't disable auto_pause_enabled - let play button re-enable it
         
+    def on_seek_start(self, event):
+        """Called when user starts dragging the progress bar"""
+        # Don't allow seeking during typing practice
+        if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            print("DEBUG: Seeking blocked during typing practice")
+            return
+            
+        self.is_user_seeking = True
+        # Remember if we were playing before seeking
+        self.was_playing_before_seek = self.player.is_playing()
+        # Pause during seek
+        if self.was_playing_before_seek:
+            self.player.pause()
+    
+    def on_seek_end(self, event):
+        """Called when user releases the progress bar"""
+        if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            return
+            
+        self.is_user_seeking = False
+        # Resume playback if we were playing before
+        if hasattr(self, 'was_playing_before_seek') and self.was_playing_before_seek:
+            self.player.play()
+            delattr(self, 'was_playing_before_seek')
+    
     def on_seek(self, value):
         if self.is_user_seeking and self.player.get_media():
+            # Don't allow seeking during typing practice
+            if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+                print("DEBUG: Seeking blocked during typing practice")
+                # Reset the progress bar to current position
+                current_time = self.player.get_time()
+                duration = self.player.get_length()
+                if duration > 0:
+                    progress = (current_time / duration) * 100
+                    self.progress_bar.set(progress)
+                return
+                
             duration = self.player.get_length()
             if duration > 0:
                 position = int(float(value) * duration / 100)
                 self.player.set_time(position)
+                # Clear pending pause info when scrubbing to new position
+                self.next_pause_time = None
+                if hasattr(self, 'next_pause_subtitle_index'):
+                    delattr(self, 'next_pause_subtitle_index')
                 
     def update_time(self):
         if self.player.get_media():
@@ -231,8 +271,9 @@ class VideoPlayer:
             # Update subtitle display
             self.update_subtitle_display(current_time)
             
-            # Check for subtitle auto-pause
-            if self.auto_pause_enabled and self.next_pause_time and current_time >= self.next_pause_time:
+            # Check for subtitle auto-pause (but not while scrubbing)
+            if (self.auto_pause_enabled and self.next_pause_time and 
+                current_time >= self.next_pause_time and not self.is_user_seeking):
                 self.pause_for_typing()
                 
         self.root.after(100, self.update_time)
