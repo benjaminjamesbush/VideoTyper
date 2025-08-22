@@ -168,6 +168,12 @@ class VideoPlayer:
             print(f"Loaded video: {Path(self.pending_video_path).name} with {len(self.subtitles)} subtitles")
             delattr(self, 'pending_video_path')
             
+            # Auto-play the video after loading
+            self.player.play()
+            # Disable VLC subtitles
+            if self.player.video_get_spu() != -1:
+                self.player.video_set_spu(-1)
+            
     def play_pause(self):
         # Don't allow play/pause during typing practice
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
