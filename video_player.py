@@ -506,21 +506,16 @@ class VideoPlayer:
             engine.iterate()
             engine.endLoop()
             
-            print("TTS: Engine ready")
         except Exception as e:
             print(f"ERROR: Failed to initialize TTS engine: {e}")
             sys.exit(1)
             
-        word_count = 0
         while True:
             try:
                 word = self.tts_queue.get(timeout=1.0)
                 
                 if word is None:  # Sentinel value to stop thread
                     break
-                
-                word_count += 1
-                print(f"TTS: Speaking word #{word_count}: {word}")
                     
                 engine.say(word)
                 # Use startLoop/iterate/endLoop instead of runAndWait() for threading
