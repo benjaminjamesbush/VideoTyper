@@ -95,6 +95,14 @@ class VideoPlayer:
         self.update_time()
         
     def open_video(self, file_path=None):
+        # Reset typing state if we were in the middle of typing
+        if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            self.typing_in_progress = False
+            self.typing_entry.pack_forget()
+            self.typing_entry.unbind('<KeyRelease>')
+            self.play_button.config(state="normal")
+            self.subtitle_label.config(text="")
+            
         if file_path is None:
             file_path = filedialog.askopenfilename(
                 title="Select Video File",
@@ -161,6 +169,11 @@ class VideoPlayer:
             delattr(self, 'pending_video_path')
             
     def play_pause(self):
+        # Don't allow play/pause during typing practice
+        if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            print("DEBUG: Play/pause blocked during typing practice")
+            return
+            
         if self.player.is_playing():
             self.player.pause()
         else:
@@ -168,9 +181,24 @@ class VideoPlayer:
             # Disable VLC subtitles on first play
             if self.player.video_get_spu() != -1:
                 self.player.video_set_spu(-1)
+            # Re-enable auto-pause if we have subtitles
+            if hasattr(self, 'subtitles') and self.subtitles:
+                self.auto_pause_enabled = True
             
     def stop(self):
         self.player.stop()
+        
+        # Reset typing state if we were in the middle of typing
+        if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            self.typing_in_progress = False
+            self.typing_entry.pack_forget()
+            self.typing_entry.unbind('<KeyRelease>')
+            self.play_button.config(state="normal")
+            self.subtitle_label.config(text="")
+            
+        # Reset pause-related state
+        self.next_pause_time = None
+        # Don't disable auto_pause_enabled - let play button re-enable it
         
     def on_seek(self, value):
         if self.is_user_seeking and self.player.get_media():
@@ -217,6 +245,7 @@ class VideoPlayer:
         
     def pause_for_typing(self):
         self.player.pause()
+        self.typing_in_progress = True  # Block play button
         
         # Mark this subtitle as paused
         if hasattr(self, 'next_pause_subtitle_index'):
@@ -277,6 +306,9 @@ class VideoPlayer:
             
             # Bind the key validation
             self.typing_entry.bind('<KeyRelease>', self.validate_keystroke)
+            
+            # Also disable the play button
+            self.play_button.config(state="disabled")
         
     def validate_keystroke(self, event):
         """Validate each keystroke and only accept correct letters"""
@@ -310,6 +342,10 @@ class VideoPlayer:
         if not self.player.is_playing():
             # Hide the typing entry
             self.typing_entry.pack_forget()
+            
+            # Re-enable the play button and clear typing flag
+            self.play_button.config(state="normal")
+            self.typing_in_progress = False
             
             # Seek to start of the interval for replay
             if hasattr(self, 'replay_start'):
