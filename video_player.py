@@ -77,15 +77,16 @@ class VideoPlayer:
         subtitle_frame = ttk.Frame(self.root)
         subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
         
-        # Use Text widget for rich formatting support
-        self.subtitle_display = tk.Text(subtitle_frame, height=2, wrap=tk.WORD, 
+        # Use Text widget for rich formatting support - single line height
+        self.subtitle_display = tk.Text(subtitle_frame, height=1, wrap=tk.NONE, 
                                        font=font.Font(size=48), foreground="white", 
                                        background="black", relief=tk.FLAT, state='disabled')
         self.subtitle_display.pack(pady=5)
         
-        # Configure tags for highlighting
+        # Configure tags for highlighting and center alignment
+        self.subtitle_display.tag_configure("center", justify='center')
         self.subtitle_display.tag_configure("highlight", foreground="yellow", 
-                                           font=font.Font(size=48, weight="bold"))
+                                           font=font.Font(size=48, weight="bold"), justify='center')
         
         # Text input field for typing practice
         self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=42), width=30, justify='center')
@@ -531,6 +532,10 @@ class VideoPlayer:
         self.subtitle_display.config(state='normal')
         self.subtitle_display.delete('1.0', tk.END)
         
+        # Replace newlines with spaces to keep everything on one line
+        if text:
+            text = text.replace('\n', ' ').replace('\r', ' ')
+        
         if highlight_word and text:
             # Find all occurrences of the word to highlight
             import re
@@ -543,17 +548,17 @@ class VideoPlayer:
                 for match in matches:
                     # Insert text before the match
                     if match.start() > last_end:
-                        self.subtitle_display.insert(tk.END, text[last_end:match.start()])
+                        self.subtitle_display.insert(tk.END, text[last_end:match.start()], "center")
                     # Insert the highlighted word in uppercase
                     self.subtitle_display.insert(tk.END, highlight_word.upper(), "highlight")
                     last_end = match.end()
                 # Insert any remaining text
                 if last_end < len(text):
-                    self.subtitle_display.insert(tk.END, text[last_end:])
+                    self.subtitle_display.insert(tk.END, text[last_end:], "center")
             else:
-                self.subtitle_display.insert(tk.END, text)
+                self.subtitle_display.insert(tk.END, text, "center")
         else:
-            self.subtitle_display.insert(tk.END, text if text else "")
+            self.subtitle_display.insert(tk.END, text if text else "", "center")
         
         self.subtitle_display.config(state='disabled')
     
