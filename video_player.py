@@ -860,7 +860,7 @@ class VideoPlayer:
                 # Create and play sound immediately
                 sound = pygame.sndarray.make_sound(arr)
                 sound.play()
-                time.sleep(0.2)  # 200ms between beeps
+                time.sleep(0.15)  # 150ms - same as beep duration, no gap
         
         # Play in separate thread to not block UI
         threading.Thread(target=play_beeps, daemon=True).start()
