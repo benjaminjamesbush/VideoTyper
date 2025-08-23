@@ -793,9 +793,18 @@ class VideoPlayer:
                 self.current_subtitle_text = text
                 
                 # Apply highlighting if we have a pre-selected word for this subtitle (not paused yet)
+                # BUT ONLY if the subtitle has actual words (not just sounds like "(GASPS)")
                 if hasattr(self, 'subtitle_words') and i in self.subtitle_words and self.subtitle_words[i] and i not in self.paused_subtitles:
-                    # Show word highlighted but not in typing mode yet
-                    self.set_subtitle_text(text, self.subtitle_words[i], None, False)
+                    # Check if subtitle has actual words to type (not just parenthetical sounds)
+                    import re
+                    clean_text = re.sub(r'\([^)]*\)', '', text).strip()
+                    words = re.findall(r'\b[a-zA-Z]+\b', clean_text)
+                    if words:  # Only highlight if there are actual words
+                        # Show word highlighted but not in typing mode yet
+                        self.set_subtitle_text(text, self.subtitle_words[i], None, False)
+                    else:
+                        # No typeable words, just show plain text
+                        self.set_subtitle_text(text)
                 # Apply highlighting if we're in typing mode (during pause)
                 elif hasattr(self, 'highlight_word') and self.highlight_word:
                     # Pass current position and flash state if actively typing
