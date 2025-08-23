@@ -30,7 +30,7 @@ class VideoPlayer:
         self.next_pause_time = None
         self.pause_offset = 50  # Pause 50ms before subtitle ends (just for timing precision)
         self.current_subtitle_text = ""
-        self.subtitle_display_index = -1
+        self.combined_canvas_index = -1
         self.paused_subtitles = set()  # Track which subtitles we've already paused for
         self.flash_state = False  # For flashing next letter indicator
         self.flash_timer = None  # Timer for flashing effect
@@ -76,14 +76,15 @@ class VideoPlayer:
         self.video_frame = ttk.Frame(self.root, width=800, height=400)
         self.video_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=0)
         
-        # Row 2: Subtitle display
-        subtitle_frame = ttk.Frame(self.root)
-        subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=0)
+        # Row 2: Combined subtitle and keyboard display
+        combined_frame = ttk.Frame(self.root)
+        combined_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=0)
         
-        # Use Canvas widget for precise text positioning and highlighting
-        self.subtitle_display = tk.Canvas(subtitle_frame, height=60, 
-                                         background="black", highlightthickness=0)
-        self.subtitle_display.pack(pady=0, fill=tk.X)
+        # Create single canvas for both subtitle and keyboard
+        # Height: 60 (subtitle) + 160 (keyboard) = 220
+        self.combined_canvas = tk.Canvas(combined_frame, width=800, height=220, 
+                                        background="black", highlightthickness=0)
+        self.combined_canvas.pack(pady=0, fill=tk.X)
         
         # Store fonts for reuse
         self.subtitle_font = font.Font(size=48)
@@ -93,20 +94,18 @@ class VideoPlayer:
         self.flash_rect_id = None
         self.flash_text_id = None
         
+        # Create keyboard display on the combined canvas
+        self.keyboard = self.create_keyboard_on_canvas()
+        
         # No visible input field - we'll capture keystrokes directly
         
-        # Row 3: Progress bar
+        # Row 3: Progress bar (moved to bottom)
         self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
         self.progress_bar.grid(row=3, column=0, sticky="ew", padx=5, pady=2)
         
-        # Row 4: Time label
+        # Row 4: Time label (at bottom with progress bar)
         self.time_label = ttk.Label(self.root, text="00:00 / 00:00")
         self.time_label.grid(row=4, column=0, pady=2)
-        
-        # Row 5: Keyboard display
-        keyboard_frame = tk.Frame(self.root, bg='black')
-        keyboard_frame.grid(row=5, column=0, sticky="ew", padx=5, pady=2)
-        self.keyboard = self.create_keyboard_display(keyboard_frame)
         
         # Typing-related variables
         self.target_word = ""
@@ -119,14 +118,13 @@ class VideoPlayer:
         
         self.update_time()
     
-    def create_keyboard_display(self, parent_frame):
-        """Create and return a keyboard display widget"""
+    def create_keyboard_on_canvas(self):
+        """Create keyboard display directly on the combined canvas"""
         
         class KeyboardDisplay:
-            def __init__(self, parent):
-                # Create Canvas for keyboard
-                self.canvas = tk.Canvas(parent, width=620, height=160, bg='white', highlightthickness=1)
-                self.canvas.pack(pady=0, anchor='center')  # Center the canvas
+            def __init__(self, canvas):
+                # Use the provided canvas instead of creating new one
+                self.canvas = canvas
                 
                 # Key dimensions
                 self.key_width = 40
@@ -136,11 +134,12 @@ class VideoPlayer:
                 
                 # Calculate centered starting positions for each row
                 # Row 1 has 12 keys: 12*40 + 11*5 = 535px total width
-                # Center in 620px canvas: (620-535)/2 = 42.5px
-                self.row1_x = 42
-                self.row2_x = 62  # Half key offset (20px from row1)
-                self.row3_x = 82  # Full key offset (40px from row1)
-                self.base_y = 10
+                # Center in 800px canvas: (800-535)/2 = 132.5px
+                self.row1_x = 133
+                self.row2_x = 153  # Half key offset (20px from row1)
+                self.row3_x = 173  # Full key offset (40px from row1)
+                # Position keyboard in lower part of canvas (subtitle is 0-60, keyboard starts at 70)
+                self.base_y = 70
                 
                 # Define keyboard layout
                 self.row1_keys = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']']
@@ -179,16 +178,16 @@ class VideoPlayer:
             
             def draw_key(self, x, y, key_char):
                 """Draw a single key at the specified position"""
-                # Draw key rectangle
+                # Draw key rectangle (white outline on black background)
                 rect = self.canvas.create_rectangle(
                     x, y, x + self.key_width, y + self.key_height,
-                    fill="white", outline="black", width=2
+                    fill="black", outline="white", width=2
                 )
                 
-                # Draw key label
+                # Draw key label (white text)
                 label = self.canvas.create_text(
                     x + self.key_width // 2, y + self.key_height // 2,
-                    text=key_char, font=self.key_font, fill="black"
+                    text=key_char, font=self.key_font, fill="white"
                 )
                 
                 # Store references for later highlighting
@@ -199,10 +198,10 @@ class VideoPlayer:
                 """Highlight a specific key"""
                 key_char = key_char.upper()
                 
-                # Reset all keys to default
+                # Reset all keys to default (black with white outline)
                 for key in self.key_rects:
-                    self.canvas.itemconfig(self.key_rects[key], fill="white", outline="black", width=2)
-                    self.canvas.itemconfig(self.key_labels[key], fill="black")
+                    self.canvas.itemconfig(self.key_rects[key], fill="black", outline="white", width=2)
+                    self.canvas.itemconfig(self.key_labels[key], fill="white")
                 
                 # Highlight the specified key
                 if key_char in self.key_rects:
@@ -223,7 +222,7 @@ class VideoPlayer:
                         self.canvas.itemconfig(self.key_rects[key_char], fill="yellow", outline="red", width=3)
                         self.canvas.itemconfig(self.key_labels[key_char], fill="red")
         
-        return KeyboardDisplay(parent_frame)
+        return KeyboardDisplay(self.combined_canvas)
         
     def open_video(self, file_path=None):
         # Reset typing state if we were in the middle of typing
@@ -417,7 +416,7 @@ class VideoPlayer:
             self.paused_subtitles.add(self.next_pause_subtitle_index)
             subtitle_index = self.next_pause_subtitle_index
         else:
-            subtitle_index = self.subtitle_display_index
+            subtitle_index = self.combined_canvas_index
             
         self.next_pause_time = None
         
@@ -617,8 +616,8 @@ class VideoPlayer:
         for i, (start_ms, end_ms, text) in enumerate(self.subtitles):
             if start_ms <= current_time <= end_ms:
                 # Always update display when we're in a subtitle's time range
-                if i != self.subtitle_display_index:
-                    self.subtitle_display_index = i
+                if i != self.combined_canvas_index:
+                    self.combined_canvas_index = i
                     print(f"DEBUG: Showing subtitle #{i} at {current_time}ms: {text[:30]}...")
                     
                     # Pre-select word for highlighting when subtitle first appears
@@ -669,16 +668,16 @@ class VideoPlayer:
                 return
         
         # No subtitle should be displayed
-        if self.subtitle_display_index != -1:
-            print(f"DEBUG: Hiding subtitle #{self.subtitle_display_index} at {current_time}ms")
-            self.subtitle_display_index = -1
+        if self.combined_canvas_index != -1:
+            print(f"DEBUG: Hiding subtitle #{self.combined_canvas_index} at {current_time}ms")
+            self.combined_canvas_index = -1
             self.current_subtitle_text = ""
             self.set_subtitle_text("")
     
     def set_subtitle_text(self, text, highlight_word=None, next_letter_pos=None, flash_red=False):
         """Update subtitle display with optional word highlighting and next letter indicator"""
-        # Clear the canvas
-        self.subtitle_display.delete("all")
+        # Clear only subtitle items (tagged as "subtitle"), not keyboard
+        self.combined_canvas.delete("subtitle")
         
         # Reset flash IDs
         self.flash_rect_id = None
@@ -691,7 +690,7 @@ class VideoPlayer:
             return
         
         # Get canvas dimensions
-        canvas_width = self.subtitle_display.winfo_width()
+        canvas_width = self.combined_canvas.winfo_width()
         if canvas_width <= 1:
             # Canvas not yet rendered, use a default
             canvas_width = 700
@@ -714,11 +713,11 @@ class VideoPlayer:
                 
                 # Measure total width to center properly
                 # Create temporary text to measure
-                temp_id = self.subtitle_display.create_text(0, 0, text=before_text + word_text + after_text, 
+                temp_id = self.combined_canvas.create_text(0, 0, text=before_text + word_text + after_text, 
                                                            font=self.subtitle_font, anchor="w")
-                bbox = self.subtitle_display.bbox(temp_id)
+                bbox = self.combined_canvas.bbox(temp_id)
                 total_width = bbox[2] - bbox[0] if bbox else 0
-                self.subtitle_display.delete(temp_id)
+                self.combined_canvas.delete(temp_id)
                 
                 # Calculate starting position for centered text
                 start_x = (canvas_width - total_width) // 2
@@ -726,14 +725,14 @@ class VideoPlayer:
                 
                 # Draw text before highlighted word
                 if before_text:
-                    self.subtitle_display.create_text(current_x, center_y, text=before_text,
-                                                     font=self.subtitle_font, fill="white", anchor="w")
+                    self.combined_canvas.create_text(current_x, center_y, text=before_text,
+                                                     font=self.subtitle_font, fill="white", anchor="w", tags="subtitle")
                     # Measure width of before text
-                    temp_id = self.subtitle_display.create_text(0, 0, text=before_text, 
+                    temp_id = self.combined_canvas.create_text(0, 0, text=before_text, 
                                                                font=self.subtitle_font, anchor="w")
-                    bbox = self.subtitle_display.bbox(temp_id)
+                    bbox = self.combined_canvas.bbox(temp_id)
                     before_width = bbox[2] - bbox[0] if bbox else 0
-                    self.subtitle_display.delete(temp_id)
+                    self.combined_canvas.delete(temp_id)
                     current_x += before_width
                 
                 # Draw highlighted word with next letter indicator
@@ -741,32 +740,32 @@ class VideoPlayer:
                     # Draw completed part
                     if next_letter_pos > 0:
                         completed_text = word_text[:next_letter_pos]
-                        self.subtitle_display.create_text(current_x, center_y, text=completed_text,
-                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                        self.combined_canvas.create_text(current_x, center_y, text=completed_text,
+                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w", tags="subtitle")
                         # Measure completed width
-                        temp_id = self.subtitle_display.create_text(0, 0, text=completed_text,
+                        temp_id = self.combined_canvas.create_text(0, 0, text=completed_text,
                                                                    font=self.subtitle_font_bold, anchor="w")
-                        bbox = self.subtitle_display.bbox(temp_id)
+                        bbox = self.combined_canvas.bbox(temp_id)
                         completed_width = bbox[2] - bbox[0] if bbox else 0
-                        self.subtitle_display.delete(temp_id)
+                        self.combined_canvas.delete(temp_id)
                         current_x += completed_width
                     
                     # Draw next letter with background
                     next_letter = word_text[next_letter_pos]
                     # Create the letter to measure it
-                    temp_id = self.subtitle_display.create_text(current_x, center_y, text=next_letter,
+                    temp_id = self.combined_canvas.create_text(current_x, center_y, text=next_letter,
                                                                font=self.subtitle_font_bold, fill="yellow", anchor="w")
-                    bbox = self.subtitle_display.bbox(temp_id)
+                    bbox = self.combined_canvas.bbox(temp_id)
                     
                     # Create background rectangle (store ID for flashing)
                     bg_color = "red" if flash_red else "yellow"
-                    self.flash_rect_id = self.subtitle_display.create_rectangle(bbox[0], bbox[1], bbox[2], bbox[3],
-                                                                               fill=bg_color, outline="")
+                    self.flash_rect_id = self.combined_canvas.create_rectangle(bbox[0], bbox[1], bbox[2], bbox[3],
+                                                                               fill=bg_color, outline="", tags="subtitle")
                     
                     # Recreate letter on top (store ID for flashing)
                     text_color = "yellow" if flash_red else "red"
-                    self.flash_text_id = self.subtitle_display.create_text(current_x, center_y, text=next_letter,
-                                                                          font=self.subtitle_font_bold, fill=text_color, anchor="w")
+                    self.flash_text_id = self.combined_canvas.create_text(current_x, center_y, text=next_letter,
+                                                                          font=self.subtitle_font_bold, fill=text_color, anchor="w", tags="subtitle")
                     
                     next_letter_width = bbox[2] - bbox[0] if bbox else 0
                     current_x += next_letter_width
@@ -774,39 +773,39 @@ class VideoPlayer:
                     # Draw remaining letters
                     if next_letter_pos + 1 < len(word_text):
                         remaining_text = word_text[next_letter_pos + 1:]
-                        self.subtitle_display.create_text(current_x, center_y, text=remaining_text,
-                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                        self.combined_canvas.create_text(current_x, center_y, text=remaining_text,
+                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w", tags="subtitle")
                         # Measure remaining width
-                        temp_id = self.subtitle_display.create_text(0, 0, text=remaining_text,
+                        temp_id = self.combined_canvas.create_text(0, 0, text=remaining_text,
                                                                    font=self.subtitle_font_bold, anchor="w")
-                        bbox = self.subtitle_display.bbox(temp_id)
+                        bbox = self.combined_canvas.bbox(temp_id)
                         remaining_width = bbox[2] - bbox[0] if bbox else 0
-                        self.subtitle_display.delete(temp_id)
+                        self.combined_canvas.delete(temp_id)
                         current_x += remaining_width
                 else:
                     # Draw entire word highlighted
-                    self.subtitle_display.create_text(current_x, center_y, text=word_text,
-                                                     font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                    self.combined_canvas.create_text(current_x, center_y, text=word_text,
+                                                     font=self.subtitle_font_bold, fill="yellow", anchor="w", tags="subtitle")
                     # Measure word width
-                    temp_id = self.subtitle_display.create_text(0, 0, text=word_text,
+                    temp_id = self.combined_canvas.create_text(0, 0, text=word_text,
                                                                font=self.subtitle_font_bold, anchor="w")
-                    bbox = self.subtitle_display.bbox(temp_id)
+                    bbox = self.combined_canvas.bbox(temp_id)
                     word_width = bbox[2] - bbox[0] if bbox else 0
-                    self.subtitle_display.delete(temp_id)
+                    self.combined_canvas.delete(temp_id)
                     current_x += word_width
                 
                 # Draw text after highlighted word
                 if after_text:
-                    self.subtitle_display.create_text(current_x, center_y, text=after_text,
-                                                     font=self.subtitle_font, fill="white", anchor="w")
+                    self.combined_canvas.create_text(current_x, center_y, text=after_text,
+                                                     font=self.subtitle_font, fill="white", anchor="w", tags="subtitle")
             else:
                 # No match found, just show regular text
-                self.subtitle_display.create_text(center_x, center_y, text=text,
-                                                 font=self.subtitle_font, fill="white", anchor="center")
+                self.combined_canvas.create_text(center_x, center_y, text=text,
+                                                 font=self.subtitle_font, fill="white", anchor="center", tags="subtitle")
         else:
             # No highlighting, just show centered text
-            self.subtitle_display.create_text(center_x, center_y, text=text,
-                                             font=self.subtitle_font, fill="white", anchor="center")
+            self.combined_canvas.create_text(center_x, center_y, text=text,
+                                             font=self.subtitle_font, fill="white", anchor="center", tags="subtitle")
     
     def load_letter_sounds(self):
         """Load all letter WAV files into memory"""
@@ -934,12 +933,12 @@ class VideoPlayer:
             if self.flash_rect_id and self.flash_text_id:
                 if self.flash_state:
                     # Red background, yellow text
-                    self.subtitle_display.itemconfig(self.flash_rect_id, fill="red")
-                    self.subtitle_display.itemconfig(self.flash_text_id, fill="yellow")
+                    self.combined_canvas.itemconfig(self.flash_rect_id, fill="red")
+                    self.combined_canvas.itemconfig(self.flash_text_id, fill="yellow")
                 else:
                     # Yellow background, red text
-                    self.subtitle_display.itemconfig(self.flash_rect_id, fill="yellow")
-                    self.subtitle_display.itemconfig(self.flash_text_id, fill="red")
+                    self.combined_canvas.itemconfig(self.flash_rect_id, fill="yellow")
+                    self.combined_canvas.itemconfig(self.flash_text_id, fill="red")
             
             # Also flash the keyboard key
             if hasattr(self, 'target_word') and self.current_position < len(self.target_word):
