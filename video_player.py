@@ -31,6 +31,8 @@ class VideoPlayer:
         self.current_subtitle_text = ""
         self.subtitle_display_index = -1
         self.paused_subtitles = set()  # Track which subtitles we've already paused for
+        self.flash_state = False  # For flashing next letter indicator
+        self.flash_timer = None  # Timer for flashing effect
         
         # Initialize TTS with a queue for thread safety
         self.tts_queue = queue.Queue()
@@ -77,18 +79,18 @@ class VideoPlayer:
         subtitle_frame = ttk.Frame(self.root)
         subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
         
-        # Use Text widget for rich formatting support - single line height
-        self.subtitle_display = tk.Text(subtitle_frame, height=1, wrap=tk.NONE, 
-                                       font=font.Font(size=48), foreground="white", 
-                                       background="black", relief=tk.FLAT, state='disabled')
-        self.subtitle_display.pack(pady=5)
+        # Use Canvas widget for precise text positioning and highlighting
+        self.subtitle_display = tk.Canvas(subtitle_frame, height=60, 
+                                         background="black", highlightthickness=0)
+        self.subtitle_display.pack(pady=5, fill=tk.X)
         
-        # Configure tags for highlighting and center alignment
-        self.subtitle_display.tag_configure("center", justify='center')
-        self.subtitle_display.tag_configure("highlight", foreground="yellow", 
-                                           font=font.Font(size=48, weight="bold"), justify='center')
-        self.subtitle_display.tag_configure("next_letter", foreground="red", underline=True,
-                                           font=font.Font(size=48, weight="bold"), justify='center')
+        # Store fonts for reuse
+        self.subtitle_font = font.Font(size=48)
+        self.subtitle_font_bold = font.Font(size=48, weight="bold")
+        
+        # Store canvas item IDs for flashing effect
+        self.flash_rect_id = None
+        self.flash_text_id = None
         
         # Text input field for typing practice
         self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=42), width=30, justify='center')
@@ -359,9 +361,10 @@ class VideoPlayer:
             # Store the word to highlight for continuous updates
             self.highlight_word = word_to_type if word_to_type else None
             
-            # Apply initial highlighting with first letter marked
+            # Apply initial highlighting with first letter marked and start flashing
             if self.highlight_word:
                 self.set_subtitle_text(text, self.highlight_word, self.current_position)
+                self.start_flash_timer()  # Start the flashing effect
             
             print(f"DEBUG: Selected word: {word_to_type} from pool: {word_pool if words else []}")
             
@@ -402,9 +405,11 @@ class VideoPlayer:
             self.typing_entry.delete(0, tk.END)
             self.typing_entry.insert(0, correct_text)
             
-            # Update subtitle display to show next letter in red
+            # Update subtitle display to show next letter with current flash state
             if hasattr(self, 'current_subtitle_text') and self.current_subtitle_text:
-                self.set_subtitle_text(self.current_subtitle_text, self.highlight_word, self.current_position)
+                flash_state = self.flash_state if hasattr(self, 'flash_state') else False
+                self.set_subtitle_text(self.current_subtitle_text, self.highlight_word, 
+                                     self.current_position, flash_state)
             
             # Speak the letter that was just typed
             print(f"DEBUG: Speaking typed letter: {expected_char}")
@@ -440,6 +445,7 @@ class VideoPlayer:
             self.play_button.config(state="normal")
             self.typing_in_progress = False
             self.highlight_word = None  # Clear the highlighting
+            self.stop_flash_timer()  # Stop the flashing effect
             
             # Seek to start of the interval for replay
             if hasattr(self, 'replay_start'):
@@ -514,9 +520,10 @@ class VideoPlayer:
                 
                 # Apply highlighting if we're in typing mode
                 if hasattr(self, 'highlight_word') and self.highlight_word:
-                    # Pass current position if actively typing
+                    # Pass current position and flash state if actively typing
                     pos = self.current_position if hasattr(self, 'current_position') else None
-                    self.set_subtitle_text(text, self.highlight_word, pos)
+                    flash = self.flash_state if hasattr(self, 'flash_state') else False
+                    self.set_subtitle_text(text, self.highlight_word, pos, flash)
                 else:
                     self.set_subtitle_text(text)
                 
@@ -535,54 +542,138 @@ class VideoPlayer:
             self.current_subtitle_text = ""
             self.set_subtitle_text("")
     
-    def set_subtitle_text(self, text, highlight_word=None, next_letter_pos=None):
+    def set_subtitle_text(self, text, highlight_word=None, next_letter_pos=None, flash_red=False):
         """Update subtitle display with optional word highlighting and next letter indicator"""
-        self.subtitle_display.config(state='normal')
-        self.subtitle_display.delete('1.0', tk.END)
+        # Clear the canvas
+        self.subtitle_display.delete("all")
         
-        # Replace newlines with spaces to keep everything on one line
+        # Reset flash IDs
+        self.flash_rect_id = None
+        self.flash_text_id = None
+        
+        # Replace newlines with spaces to keep everything on one line and trim
         if text:
-            text = text.replace('\n', ' ').replace('\r', ' ')
+            text = text.replace('\n', ' ').replace('\r', ' ').strip()
+        else:
+            return
+        
+        # Get canvas dimensions
+        canvas_width = self.subtitle_display.winfo_width()
+        if canvas_width <= 1:
+            # Canvas not yet rendered, use a default
+            canvas_width = 700
+        center_x = canvas_width // 2
+        center_y = 30  # Center vertically in 60px height
         
         if highlight_word and text:
-            # Find all occurrences of the word to highlight
+            # Find the word to highlight
             import re
             pattern = r'\b' + re.escape(highlight_word) + r'\b'
             matches = list(re.finditer(pattern, text, re.IGNORECASE))
             
             if matches:
-                # Insert text with highlighting
-                last_end = 0
-                for match in matches:
-                    # Insert text before the match
-                    if match.start() > last_end:
-                        self.subtitle_display.insert(tk.END, text[last_end:match.start()], "center")
+                match = matches[0]  # Use first match
+                
+                # Split text into parts
+                before_text = text[:match.start()]
+                word_text = highlight_word.upper()
+                after_text = text[match.end():]
+                
+                # Measure total width to center properly
+                # Create temporary text to measure
+                temp_id = self.subtitle_display.create_text(0, 0, text=before_text + word_text + after_text, 
+                                                           font=self.subtitle_font, anchor="w")
+                bbox = self.subtitle_display.bbox(temp_id)
+                total_width = bbox[2] - bbox[0] if bbox else 0
+                self.subtitle_display.delete(temp_id)
+                
+                # Calculate starting position for centered text
+                start_x = (canvas_width - total_width) // 2
+                current_x = start_x
+                
+                # Draw text before highlighted word
+                if before_text:
+                    self.subtitle_display.create_text(current_x, center_y, text=before_text,
+                                                     font=self.subtitle_font, fill="white", anchor="w")
+                    # Measure width of before text
+                    temp_id = self.subtitle_display.create_text(0, 0, text=before_text, 
+                                                               font=self.subtitle_font, anchor="w")
+                    bbox = self.subtitle_display.bbox(temp_id)
+                    before_width = bbox[2] - bbox[0] if bbox else 0
+                    self.subtitle_display.delete(temp_id)
+                    current_x += before_width
+                
+                # Draw highlighted word with next letter indicator
+                if next_letter_pos is not None and next_letter_pos < len(word_text):
+                    # Draw completed part
+                    if next_letter_pos > 0:
+                        completed_text = word_text[:next_letter_pos]
+                        self.subtitle_display.create_text(current_x, center_y, text=completed_text,
+                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                        # Measure completed width
+                        temp_id = self.subtitle_display.create_text(0, 0, text=completed_text,
+                                                                   font=self.subtitle_font_bold, anchor="w")
+                        bbox = self.subtitle_display.bbox(temp_id)
+                        completed_width = bbox[2] - bbox[0] if bbox else 0
+                        self.subtitle_display.delete(temp_id)
+                        current_x += completed_width
                     
-                    # Insert the highlighted word in uppercase with next letter marked
-                    word_upper = highlight_word.upper()
-                    if next_letter_pos is not None and next_letter_pos < len(word_upper):
-                        # Insert the part already typed
-                        if next_letter_pos > 0:
-                            self.subtitle_display.insert(tk.END, word_upper[:next_letter_pos], "highlight")
-                        # Insert the next letter to type in red
-                        self.subtitle_display.insert(tk.END, word_upper[next_letter_pos], "next_letter")
-                        # Insert the remaining letters
-                        if next_letter_pos + 1 < len(word_upper):
-                            self.subtitle_display.insert(tk.END, word_upper[next_letter_pos + 1:], "highlight")
-                    else:
-                        # No active typing or word complete - show entire word highlighted
-                        self.subtitle_display.insert(tk.END, word_upper, "highlight")
+                    # Draw next letter with background
+                    next_letter = word_text[next_letter_pos]
+                    # Create the letter to measure it
+                    temp_id = self.subtitle_display.create_text(current_x, center_y, text=next_letter,
+                                                               font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                    bbox = self.subtitle_display.bbox(temp_id)
                     
-                    last_end = match.end()
-                # Insert any remaining text
-                if last_end < len(text):
-                    self.subtitle_display.insert(tk.END, text[last_end:], "center")
+                    # Create background rectangle (store ID for flashing)
+                    bg_color = "red" if flash_red else "yellow"
+                    self.flash_rect_id = self.subtitle_display.create_rectangle(bbox[0], bbox[1], bbox[2], bbox[3],
+                                                                               fill=bg_color, outline="")
+                    
+                    # Recreate letter on top (store ID for flashing)
+                    text_color = "yellow" if flash_red else "red"
+                    self.flash_text_id = self.subtitle_display.create_text(current_x, center_y, text=next_letter,
+                                                                          font=self.subtitle_font_bold, fill=text_color, anchor="w")
+                    
+                    next_letter_width = bbox[2] - bbox[0] if bbox else 0
+                    current_x += next_letter_width
+                    
+                    # Draw remaining letters
+                    if next_letter_pos + 1 < len(word_text):
+                        remaining_text = word_text[next_letter_pos + 1:]
+                        self.subtitle_display.create_text(current_x, center_y, text=remaining_text,
+                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                        # Measure remaining width
+                        temp_id = self.subtitle_display.create_text(0, 0, text=remaining_text,
+                                                                   font=self.subtitle_font_bold, anchor="w")
+                        bbox = self.subtitle_display.bbox(temp_id)
+                        remaining_width = bbox[2] - bbox[0] if bbox else 0
+                        self.subtitle_display.delete(temp_id)
+                        current_x += remaining_width
+                else:
+                    # Draw entire word highlighted
+                    self.subtitle_display.create_text(current_x, center_y, text=word_text,
+                                                     font=self.subtitle_font_bold, fill="yellow", anchor="w")
+                    # Measure word width
+                    temp_id = self.subtitle_display.create_text(0, 0, text=word_text,
+                                                               font=self.subtitle_font_bold, anchor="w")
+                    bbox = self.subtitle_display.bbox(temp_id)
+                    word_width = bbox[2] - bbox[0] if bbox else 0
+                    self.subtitle_display.delete(temp_id)
+                    current_x += word_width
+                
+                # Draw text after highlighted word
+                if after_text:
+                    self.subtitle_display.create_text(current_x, center_y, text=after_text,
+                                                     font=self.subtitle_font, fill="white", anchor="w")
             else:
-                self.subtitle_display.insert(tk.END, text, "center")
+                # No match found, just show regular text
+                self.subtitle_display.create_text(center_x, center_y, text=text,
+                                                 font=self.subtitle_font, fill="white", anchor="center")
         else:
-            self.subtitle_display.insert(tk.END, text if text else "", "center")
-        
-        self.subtitle_display.config(state='disabled')
+            # No highlighting, just show centered text
+            self.subtitle_display.create_text(center_x, center_y, text=text,
+                                             font=self.subtitle_font, fill="white", anchor="center")
     
     def load_letter_sounds(self):
         """Load all letter WAV files into memory"""
@@ -653,6 +744,37 @@ class VideoPlayer:
     def speak_letter(self, letter):
         """Play the sound for the typed letter"""
         self.play_letter_sound(letter)
+    
+    def start_flash_timer(self):
+        """Start the flashing effect for the next letter indicator"""
+        self.stop_flash_timer()  # Cancel any existing timer
+        self.flash_next_letter()
+    
+    def stop_flash_timer(self):
+        """Stop the flashing effect"""
+        if self.flash_timer:
+            self.root.after_cancel(self.flash_timer)
+            self.flash_timer = None
+            self.flash_state = False
+    
+    def flash_next_letter(self):
+        """Toggle the flash state and update display"""
+        if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            self.flash_state = not self.flash_state
+            
+            # Update the canvas items directly for flashing effect
+            if self.flash_rect_id and self.flash_text_id:
+                if self.flash_state:
+                    # Red background, yellow text
+                    self.subtitle_display.itemconfig(self.flash_rect_id, fill="red")
+                    self.subtitle_display.itemconfig(self.flash_text_id, fill="yellow")
+                else:
+                    # Yellow background, red text
+                    self.subtitle_display.itemconfig(self.flash_rect_id, fill="yellow")
+                    self.subtitle_display.itemconfig(self.flash_text_id, fill="red")
+            
+            # Schedule next flash in 500ms
+            self.flash_timer = self.root.after(500, self.flash_next_letter)
     
     def schedule_hint(self):
         """Schedule a hint to be spoken after 2 seconds"""
