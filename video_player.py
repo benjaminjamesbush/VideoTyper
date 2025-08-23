@@ -347,16 +347,20 @@ class VideoPlayer:
             # Keep the subtitle visible during the pause
             self.set_subtitle_text(text)
             
-            # Show the word to type - randomly select from available words
-            if words:
-                # Filter for words longer than 2 chars and no apostrophes
-                # Avoid fragments like "couldn" from "couldn't"
-                clean_words = [w for w in words if "'" not in text[max(0, text.find(w)-1):text.find(w)+len(w)+1]]
-                longer_words = [w for w in clean_words if len(w) > 2]
-                word_pool = longer_words if longer_words else clean_words if clean_words else words
-                word_to_type = random.choice(word_pool)
+            # Use the pre-selected word for this subtitle if available
+            if hasattr(self, 'subtitle_words') and subtitle_index in self.subtitle_words and self.subtitle_words[subtitle_index]:
+                word_to_type = self.subtitle_words[subtitle_index]
             else:
-                word_to_type = ""
+                # Fallback to selecting a word if not pre-selected
+                if words:
+                    # Filter for words longer than 2 chars and no apostrophes
+                    # Avoid fragments like "couldn" from "couldn't"
+                    clean_words = [w for w in words if "'" not in text[max(0, text.find(w)-1):text.find(w)+len(w)+1]]
+                    longer_words = [w for w in clean_words if len(w) > 2]
+                    word_pool = longer_words if longer_words else clean_words if clean_words else words
+                    word_to_type = random.choice(word_pool)
+                else:
+                    word_to_type = ""
             
             # Store the word to highlight for continuous updates
             self.highlight_word = word_to_type if word_to_type else None
@@ -366,7 +370,7 @@ class VideoPlayer:
                 self.set_subtitle_text(text, self.highlight_word, self.current_position)
                 self.start_flash_timer()  # Start the flashing effect
             
-            print(f"DEBUG: Selected word: {word_to_type} from pool: {word_pool if words else []}")
+            print(f"DEBUG: Using pre-selected word: {word_to_type}" if (hasattr(self, 'subtitle_words') and subtitle_index in self.subtitle_words) else f"DEBUG: Selected word: {word_to_type}")
             
             # Speak the word using TTS
             if word_to_type:
@@ -514,12 +518,39 @@ class VideoPlayer:
                 if i != self.subtitle_display_index:
                     self.subtitle_display_index = i
                     print(f"DEBUG: Showing subtitle #{i} at {current_time}ms: {text[:30]}...")
+                    
+                    # Pre-select word for highlighting when subtitle first appears
+                    if self.auto_pause_enabled and i not in self.paused_subtitles:
+                        # Extract words from the subtitle text
+                        import re
+                        words = re.findall(r'\b[a-zA-Z]+\b', text)
+                        
+                        if words:
+                            # Filter for words longer than 2 chars and no apostrophes
+                            clean_words = [w for w in words if "'" not in text[max(0, text.find(w)-1):text.find(w)+len(w)+1]]
+                            longer_words = [w for w in clean_words if len(w) > 2]
+                            word_pool = longer_words if longer_words else clean_words if clean_words else words
+                            
+                            # Select and store the word for THIS subtitle using its index as key
+                            import random
+                            if not hasattr(self, 'subtitle_words'):
+                                self.subtitle_words = {}
+                            self.subtitle_words[i] = random.choice(word_pool)
+                            print(f"DEBUG: Pre-selected word '{self.subtitle_words[i]}' for subtitle #{i}")
+                        else:
+                            if not hasattr(self, 'subtitle_words'):
+                                self.subtitle_words = {}
+                            self.subtitle_words[i] = None
                 
                 # Always set the text, not just when index changes
                 self.current_subtitle_text = text
                 
-                # Apply highlighting if we're in typing mode
-                if hasattr(self, 'highlight_word') and self.highlight_word:
+                # Apply highlighting if we have a pre-selected word for this subtitle (not paused yet)
+                if hasattr(self, 'subtitle_words') and i in self.subtitle_words and self.subtitle_words[i] and i not in self.paused_subtitles:
+                    # Show word highlighted but not in typing mode yet
+                    self.set_subtitle_text(text, self.subtitle_words[i], None, False)
+                # Apply highlighting if we're in typing mode (during pause)
+                elif hasattr(self, 'highlight_word') and self.highlight_word:
                     # Pass current position and flash state if actively typing
                     pos = self.current_position if hasattr(self, 'current_position') else None
                     flash = self.flash_state if hasattr(self, 'flash_state') else False
