@@ -208,6 +208,20 @@ class VideoPlayer:
                 if key_char in self.key_rects:
                     self.canvas.itemconfig(self.key_rects[key_char], fill="yellow", outline="red", width=3)
                     self.canvas.itemconfig(self.key_labels[key_char], fill="red")
+                    
+            def flash_key(self, key_char, flash_state):
+                """Flash a key between two color states"""
+                key_char = key_char.upper()
+                
+                if key_char in self.key_rects:
+                    if flash_state:
+                        # Red background, yellow text
+                        self.canvas.itemconfig(self.key_rects[key_char], fill="red", outline="yellow", width=3)
+                        self.canvas.itemconfig(self.key_labels[key_char], fill="yellow")
+                    else:
+                        # Yellow background, red text
+                        self.canvas.itemconfig(self.key_rects[key_char], fill="yellow", outline="red", width=3)
+                        self.canvas.itemconfig(self.key_labels[key_char], fill="red")
         
         return KeyboardDisplay(parent_frame)
         
@@ -909,6 +923,11 @@ class VideoPlayer:
                     # Yellow background, red text
                     self.subtitle_display.itemconfig(self.flash_rect_id, fill="yellow")
                     self.subtitle_display.itemconfig(self.flash_text_id, fill="red")
+            
+            # Also flash the keyboard key
+            if hasattr(self, 'target_word') and self.current_position < len(self.target_word):
+                next_char = self.target_word[self.current_position]
+                self.keyboard.flash_key(next_char, self.flash_state)
             
             # Schedule next flash in 500ms
             self.flash_timer = self.root.after(500, self.flash_next_letter)
