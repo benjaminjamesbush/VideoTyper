@@ -126,7 +126,7 @@ class VideoPlayer:
             def __init__(self, parent):
                 # Create Canvas for keyboard
                 self.canvas = tk.Canvas(parent, width=620, height=160, bg='white', highlightthickness=1)
-                self.canvas.pack(pady=0)
+                self.canvas.pack(pady=0, anchor='center')  # Center the canvas
                 
                 # Key dimensions
                 self.key_width = 40
@@ -134,10 +134,12 @@ class VideoPlayer:
                 self.key_spacing = 5
                 self.row_spacing = 10
                 
-                # Starting positions for each row
-                self.row1_x = 20
-                self.row2_x = 40  # Half key offset (20px)
-                self.row3_x = 60  # Full key offset (40px)
+                # Calculate centered starting positions for each row
+                # Row 1 has 12 keys: 12*40 + 11*5 = 535px total width
+                # Center in 620px canvas: (620-535)/2 = 42.5px
+                self.row1_x = 42
+                self.row2_x = 62  # Half key offset (20px from row1)
+                self.row3_x = 82  # Full key offset (40px from row1)
                 self.base_y = 10
                 
                 # Define keyboard layout
