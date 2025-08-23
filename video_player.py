@@ -156,6 +156,45 @@ class VideoPlayer:
                 # Draw the keyboard
                 self.draw_keyboard()
                 
+            def reposition_keyboard(self, word_x_position):
+                """Reposition keyboard to align with word position"""
+                # Store current highlighted key and flash state before clearing
+                current_highlighted_key = getattr(self, 'current_highlighted_key', None)
+                current_flash_state = getattr(self, 'current_flash_state', False)
+                
+                # Clear existing keyboard
+                self.canvas.delete("keyboard")
+                self.key_rects.clear()
+                self.key_labels.clear()
+                
+                # Calculate keyboard total width (12 keys * 40 + 11 spaces * 5 = 535px)
+                keyboard_width = 535
+                canvas_width = self.canvas.winfo_width()
+                if canvas_width <= 1:
+                    canvas_width = 800  # Default
+                
+                # Center keyboard under the word, but keep within canvas bounds
+                ideal_x = word_x_position - keyboard_width // 2
+                
+                # Constrain to canvas bounds
+                min_x = 10
+                max_x = canvas_width - keyboard_width - 10
+                new_x = max(min_x, min(ideal_x, max_x))
+                
+                # Update row positions
+                self.row1_x = new_x
+                self.row2_x = new_x + 20  # Half key offset
+                self.row3_x = new_x + 40  # Full key offset
+                
+                # Redraw keyboard at new position
+                self.draw_keyboard()
+                
+                # Restore highlight state if there was one
+                if current_highlighted_key:
+                    self.highlight_key(current_highlighted_key)
+                    if current_flash_state:
+                        self.flash_key(current_highlighted_key, current_flash_state)
+                
             def draw_keyboard(self):
                 """Draw all keys on the canvas"""
                 # Draw row 1 (Q-P, [, ])
@@ -181,13 +220,13 @@ class VideoPlayer:
                 # Draw key rectangle (white outline on black background)
                 rect = self.canvas.create_rectangle(
                     x, y, x + self.key_width, y + self.key_height,
-                    fill="black", outline="white", width=2
+                    fill="black", outline="white", width=2, tags="keyboard"
                 )
                 
                 # Draw key label (white text)
                 label = self.canvas.create_text(
                     x + self.key_width // 2, y + self.key_height // 2,
-                    text=key_char, font=self.key_font, fill="white"
+                    text=key_char, font=self.key_font, fill="white", tags="keyboard"
                 )
                 
                 # Store references for later highlighting
@@ -197,6 +236,9 @@ class VideoPlayer:
             def highlight_key(self, key_char):
                 """Highlight a specific key"""
                 key_char = key_char.upper()
+                
+                # Store the currently highlighted key
+                self.current_highlighted_key = key_char if key_char else None
                 
                 # Reset all keys to default (black with white outline)
                 for key in self.key_rects:
@@ -211,6 +253,9 @@ class VideoPlayer:
             def flash_key(self, key_char, flash_state):
                 """Flash a key between two color states"""
                 key_char = key_char.upper()
+                
+                # Store the flash state
+                self.current_flash_state = flash_state
                 
                 if key_char in self.key_rects:
                     if flash_state:
@@ -552,6 +597,9 @@ class VideoPlayer:
             self.highlight_word = None  # Clear the highlighting
             self.stop_flash_timer()  # Stop the flashing effect
             
+            # Clear the subtitle display since we're moving on
+            self.set_subtitle_text("")
+            
             # Seek to start of the interval for replay
             if hasattr(self, 'replay_start'):
                 self.player.set_time(self.replay_start)
@@ -735,6 +783,9 @@ class VideoPlayer:
                     self.combined_canvas.delete(temp_id)
                     current_x += before_width
                 
+                # Store word position for keyboard alignment
+                word_start_x = current_x
+                
                 # Draw highlighted word with next letter indicator
                 if next_letter_pos is not None and next_letter_pos < len(word_text):
                     # Draw completed part
@@ -756,6 +807,7 @@ class VideoPlayer:
                     temp_id = self.combined_canvas.create_text(current_x, center_y, text=next_letter,
                                                                font=self.subtitle_font_bold, fill="yellow", anchor="w")
                     bbox = self.combined_canvas.bbox(temp_id)
+                    self.combined_canvas.delete(temp_id)  # Delete the temporary measurement text
                     
                     # Create background rectangle (store ID for flashing)
                     bg_color = "red" if flash_red else "yellow"
@@ -798,6 +850,13 @@ class VideoPlayer:
                 if after_text:
                     self.combined_canvas.create_text(current_x, center_y, text=after_text,
                                                      font=self.subtitle_font, fill="white", anchor="w", tags="subtitle")
+                
+                # Reposition keyboard to align with highlighted word
+                if hasattr(self, 'keyboard'):
+                    # Calculate center of highlighted word (word starts at word_start_x, ends at current_x before after_text)
+                    word_end_x = current_x
+                    word_center_x = (word_start_x + word_end_x) // 2
+                    self.keyboard.reposition_keyboard(word_center_x)
             else:
                 # No match found, just show regular text
                 self.combined_canvas.create_text(center_x, center_y, text=text,
