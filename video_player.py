@@ -63,7 +63,7 @@ class VideoPlayer:
         
         # Row 0: Control buttons
         control_frame = ttk.Frame(self.root)
-        control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
         
         self.open_button = ttk.Button(control_frame, text="Open Video", command=self.open_video)
         self.open_button.pack(side=tk.LEFT, padx=5)
@@ -74,16 +74,16 @@ class VideoPlayer:
         
         # Row 1: Video frame (expands)
         self.video_frame = ttk.Frame(self.root, width=800, height=400)
-        self.video_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        self.video_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=0)
         
         # Row 2: Subtitle display
         subtitle_frame = ttk.Frame(self.root)
-        subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        subtitle_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=0)
         
         # Use Canvas widget for precise text positioning and highlighting
         self.subtitle_display = tk.Canvas(subtitle_frame, height=60, 
                                          background="black", highlightthickness=0)
-        self.subtitle_display.pack(pady=5, fill=tk.X)
+        self.subtitle_display.pack(pady=0, fill=tk.X)
         
         # Store fonts for reuse
         self.subtitle_font = font.Font(size=48)
@@ -97,15 +97,15 @@ class VideoPlayer:
         
         # Row 3: Progress bar
         self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
-        self.progress_bar.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+        self.progress_bar.grid(row=3, column=0, sticky="ew", padx=5, pady=2)
         
         # Row 4: Time label
         self.time_label = ttk.Label(self.root, text="00:00 / 00:00")
-        self.time_label.grid(row=4, column=0, pady=5)
+        self.time_label.grid(row=4, column=0, pady=2)
         
         # Row 5: Keyboard display
         keyboard_frame = tk.Frame(self.root, bg='black')
-        keyboard_frame.grid(row=5, column=0, sticky="ew", padx=5, pady=5)
+        keyboard_frame.grid(row=5, column=0, sticky="ew", padx=5, pady=2)
         self.keyboard = self.create_keyboard_display(keyboard_frame)
         
         # Typing-related variables
@@ -126,7 +126,7 @@ class VideoPlayer:
             def __init__(self, parent):
                 # Create Canvas for keyboard
                 self.canvas = tk.Canvas(parent, width=620, height=160, bg='white', highlightthickness=1)
-                self.canvas.pack(pady=5)
+                self.canvas.pack(pady=0)
                 
                 # Key dimensions
                 self.key_width = 40
