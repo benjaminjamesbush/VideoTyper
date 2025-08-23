@@ -96,6 +96,8 @@ class VideoPlayer:
         
         # Create keyboard display on the combined canvas
         self.keyboard = self.create_keyboard_on_canvas()
+        # Hide keyboard initially
+        self.keyboard.hide()
         
         # No visible input field - we'll capture keystrokes directly
         
@@ -155,6 +157,18 @@ class VideoPlayer:
                 
                 # Draw the keyboard
                 self.draw_keyboard()
+                self.visible = True
+                
+            def hide(self):
+                """Hide all keyboard elements"""
+                self.canvas.delete("keyboard")
+                self.visible = False
+                
+            def show(self):
+                """Show keyboard elements"""
+                if not self.visible:
+                    self.draw_keyboard()
+                    self.visible = True
                 
             def reposition_keyboard_to_letter(self, letter_x_position, letter_char):
                 """Reposition keyboard to align a specific key with the subtitle letter position"""
@@ -560,6 +574,9 @@ class VideoPlayer:
             # Store the interval for replay on continue
             self.replay_start = start_ms
             
+            # Show keyboard when paused for typing
+            self.keyboard.show()
+            
             # Keep the subtitle visible during the pause
             self.set_subtitle_text(text)
             
@@ -647,8 +664,9 @@ class VideoPlayer:
                 print(f"DEBUG: Word complete: {self.target_word}")
                 self.cancel_hints()  # Cancel any pending hints
                 self.root.unbind('<KeyPress>')  # Unbind to prevent further input
-                # Clear keyboard highlighting
+                # Clear keyboard highlighting and hide it
                 self.keyboard.highlight_key('')  # Empty string will reset all keys
+                self.keyboard.hide()
                 # Play reward sound
                 self.play_reward_sound()
                 # Delay slightly longer to let reward sound play
