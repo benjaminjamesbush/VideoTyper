@@ -13,6 +13,7 @@ import threading
 import pyttsx3
 import queue
 import pygame
+import numpy as np
 
 class VideoPlayer:
     def __init__(self, root):
@@ -40,7 +41,7 @@ class VideoPlayer:
         self.tts_thread.start()
         
         # Initialize pygame mixer for letter sounds
-        pygame.mixer.init()
+        pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
         self.letter_sounds = {}
         self.load_letter_sounds()
         
@@ -533,7 +534,10 @@ class VideoPlayer:
                 self.root.unbind('<KeyPress>')  # Unbind to prevent further input
                 # Clear keyboard highlighting
                 self.keyboard.highlight_key('')  # Empty string will reset all keys
-                self.root.after(100, self.continue_playback)  # Small delay before continuing
+                # Play reward sound
+                self.play_reward_sound()
+                # Delay slightly longer to let reward sound play
+                self.root.after(1200, self.continue_playback)  # 1.2 seconds for the beeps
         # else: Wrong key - just ignore it (no visual feedback needed)
     
     def continue_playback(self):
@@ -825,6 +829,41 @@ class VideoPlayer:
                 self.letter_sounds[letter_upper].play()
             except Exception as e:
                 print(f"Error playing letter sound {letter}: {e}")
+    
+    def play_reward_sound(self):
+        """Generate and play 5 beeps with random pitches"""
+        def play_beeps():
+            sample_rate = 22050
+            duration = 0.15  # 150ms per beep
+            
+            for i in range(5):
+                # Random frequency between 400Hz and 800Hz
+                frequency = random.randint(400, 800)
+                
+                # Generate sine wave
+                frames = int(sample_rate * duration)
+                arr = np.zeros((frames, 2), dtype=np.int16)
+                max_amplitude = 2000  # Lower volume for pleasant sound
+                
+                for j in range(frames):
+                    t = float(j) / sample_rate
+                    # Apply fade in/out to avoid clicks
+                    envelope = 1.0
+                    if j < frames * 0.1:  # Fade in
+                        envelope = j / (frames * 0.1)
+                    elif j > frames * 0.9:  # Fade out
+                        envelope = (frames - j) / (frames * 0.1)
+                    
+                    value = int(max_amplitude * envelope * np.sin(2 * np.pi * frequency * t))
+                    arr[j] = [value, value]  # Stereo
+                
+                # Create and play sound immediately
+                sound = pygame.sndarray.make_sound(arr)
+                sound.play()
+                time.sleep(0.2)  # 200ms between beeps
+        
+        # Play in separate thread to not block UI
+        threading.Thread(target=play_beeps, daemon=True).start()
     
     def _tts_worker(self):
         """Worker thread for TTS - processes words from queue"""
