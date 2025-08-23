@@ -762,10 +762,21 @@ class VideoPlayer:
                         words = re.findall(r'\b[a-zA-Z]+\b', text)
                         
                         if words:
+                            # Filter out words that precede a colon (like speaker names)
+                            filtered_words = []
+                            for w in words:
+                                # Check if this word is followed by a colon
+                                word_pos = text.find(w)
+                                if word_pos != -1:
+                                    # Look for colon after the word (allowing for spaces)
+                                    after_word = text[word_pos + len(w):word_pos + len(w) + 5]
+                                    if ':' not in after_word.strip():
+                                        filtered_words.append(w)
+                            
                             # Filter for words longer than 2 chars and no apostrophes
-                            clean_words = [w for w in words if "'" not in text[max(0, text.find(w)-1):text.find(w)+len(w)+1]]
+                            clean_words = [w for w in filtered_words if "'" not in text[max(0, text.find(w)-1):text.find(w)+len(w)+1]]
                             longer_words = [w for w in clean_words if len(w) > 2]
-                            word_pool = longer_words if longer_words else clean_words if clean_words else words
+                            word_pool = longer_words if longer_words else clean_words if clean_words else filtered_words if filtered_words else words
                             
                             # Select and store the word for THIS subtitle using its index as key
                             import random
