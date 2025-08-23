@@ -185,6 +185,7 @@ class VideoPlayer:
                     return
                 
                 # Calculate where this key would be relative to keyboard start
+                # We want the center of the key to align with the center of the letter
                 key_x_offset = row_offset + key_index * (self.key_width + self.key_spacing) + self.key_width // 2
                 
                 # Calculate where keyboard should start to align this key with the letter
@@ -871,13 +872,14 @@ class VideoPlayer:
                     
                     # Draw next letter with background
                     next_letter = word_text[next_letter_pos]
-                    # Store the position of the next letter for keyboard alignment
-                    next_letter_x = current_x
                     # Create the letter to measure it
                     temp_id = self.combined_canvas.create_text(current_x, center_y, text=next_letter,
                                                                font=self.subtitle_font_bold, fill="yellow", anchor="w")
                     bbox = self.combined_canvas.bbox(temp_id)
                     self.combined_canvas.delete(temp_id)  # Delete the temporary measurement text
+                    
+                    # Store the CENTER position of the next letter for keyboard alignment
+                    next_letter_x = current_x + (bbox[2] - bbox[0]) / 2 if bbox else current_x
                     
                     # Create background rectangle (store ID for flashing)
                     bg_color = "red" if flash_red else "yellow"
