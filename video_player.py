@@ -156,6 +156,74 @@ class VideoPlayer:
                 # Draw the keyboard
                 self.draw_keyboard()
                 
+            def reposition_keyboard_to_letter(self, letter_x_position, letter_char):
+                """Reposition keyboard to align a specific key with the subtitle letter position"""
+                if not letter_char:
+                    return
+                    
+                letter_char = letter_char.upper()
+                
+                # Find which row and position the letter is in
+                key_row = None
+                key_index = None
+                row_offset = 0
+                
+                if letter_char in self.row1_keys:
+                    key_row = 1
+                    key_index = self.row1_keys.index(letter_char)
+                    row_offset = 0
+                elif letter_char in self.row2_keys:
+                    key_row = 2
+                    key_index = self.row2_keys.index(letter_char)
+                    row_offset = 20  # Half key offset
+                elif letter_char in self.row3_keys:
+                    key_row = 3
+                    key_index = self.row3_keys.index(letter_char)
+                    row_offset = 40  # Full key offset
+                else:
+                    # Letter not found in keyboard, fall back to centering
+                    return
+                
+                # Calculate where this key would be relative to keyboard start
+                key_x_offset = row_offset + key_index * (self.key_width + self.key_spacing) + self.key_width // 2
+                
+                # Calculate where keyboard should start to align this key with the letter
+                keyboard_start_x = letter_x_position - key_x_offset
+                
+                # Store current highlighted key and flash state before clearing
+                current_highlighted_key = getattr(self, 'current_highlighted_key', None)
+                current_flash_state = getattr(self, 'current_flash_state', False)
+                
+                # Clear existing keyboard
+                self.canvas.delete("keyboard")
+                self.key_rects.clear()
+                self.key_labels.clear()
+                
+                # Calculate keyboard total width (12 keys * 40 + 11 spaces * 5 = 535px)
+                keyboard_width = 535
+                canvas_width = self.canvas.winfo_width()
+                if canvas_width <= 1:
+                    canvas_width = 800  # Default
+                
+                # Constrain to canvas bounds
+                min_x = 10
+                max_x = canvas_width - keyboard_width - 10
+                new_x = max(min_x, min(keyboard_start_x, max_x))
+                
+                # Update row positions
+                self.row1_x = new_x
+                self.row2_x = new_x + 20  # Half key offset
+                self.row3_x = new_x + 40  # Full key offset
+                
+                # Redraw keyboard at new position
+                self.draw_keyboard()
+                
+                # Restore highlight state if there was one
+                if current_highlighted_key:
+                    self.highlight_key(current_highlighted_key)
+                    if current_flash_state:
+                        self.flash_key(current_highlighted_key, current_flash_state)
+            
             def reposition_keyboard(self, word_x_position):
                 """Reposition keyboard to align with word position"""
                 # Store current highlighted key and flash state before clearing
@@ -803,6 +871,8 @@ class VideoPlayer:
                     
                     # Draw next letter with background
                     next_letter = word_text[next_letter_pos]
+                    # Store the position of the next letter for keyboard alignment
+                    next_letter_x = current_x
                     # Create the letter to measure it
                     temp_id = self.combined_canvas.create_text(current_x, center_y, text=next_letter,
                                                                font=self.subtitle_font_bold, fill="yellow", anchor="w")
@@ -851,12 +921,10 @@ class VideoPlayer:
                     self.combined_canvas.create_text(current_x, center_y, text=after_text,
                                                      font=self.subtitle_font, fill="white", anchor="w", tags="subtitle")
                 
-                # Reposition keyboard to align with highlighted word
-                if hasattr(self, 'keyboard'):
-                    # Calculate center of highlighted word (word starts at word_start_x, ends at current_x before after_text)
-                    word_end_x = current_x
-                    word_center_x = (word_start_x + word_end_x) // 2
-                    self.keyboard.reposition_keyboard(word_center_x)
+                # Reposition keyboard to align highlighted letter with subtitle letter
+                if hasattr(self, 'keyboard') and next_letter_pos is not None and next_letter_pos < len(word_text):
+                    # Use the stored position of the next letter
+                    self.keyboard.reposition_keyboard_to_letter(next_letter_x, next_letter)
             else:
                 # No match found, just show regular text
                 self.combined_canvas.create_text(center_x, center_y, text=text,
