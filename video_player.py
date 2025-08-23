@@ -92,10 +92,7 @@ class VideoPlayer:
         self.flash_rect_id = None
         self.flash_text_id = None
         
-        # Text input field for typing practice
-        self.typing_entry = ttk.Entry(subtitle_frame, font=font.Font(size=42), width=30, justify='center')
-        self.typing_entry.pack(pady=5)  # Always visible to prevent layout jumps
-        self.typing_entry.config(state='disabled')  # Initially disabled
+        # No visible input field - we'll capture keystrokes directly
         
         # Row 3: Progress bar
         self.progress_bar = ttk.Scale(self.root, from_=0, to=100, orient=tk.HORIZONTAL, command=self.on_seek)
@@ -229,10 +226,7 @@ class VideoPlayer:
         # Reset typing state if we were in the middle of typing
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
             self.typing_in_progress = False
-            self.typing_entry.config(state='normal')
-            self.typing_entry.delete(0, tk.END)  # Clear instead of hiding
-            self.typing_entry.config(state='disabled')  # Disable to prevent input
-            self.typing_entry.unbind('<KeyRelease>')
+            self.root.unbind('<KeyPress>')
             self.play_button.config(state="normal")
             
         if file_path is None:
@@ -320,10 +314,7 @@ class VideoPlayer:
         # Reset typing state if we were in the middle of typing
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
             self.typing_in_progress = False
-            self.typing_entry.config(state='normal')
-            self.typing_entry.delete(0, tk.END)  # Clear instead of hiding
-            self.typing_entry.config(state='disabled')  # Disable to prevent input
-            self.typing_entry.unbind('<KeyRelease>')
+            self.root.unbind('<KeyPress>')
             self.play_button.config(state="normal")
             
         # Reset pause-related state
@@ -488,16 +479,14 @@ class VideoPlayer:
             # Set up typing input
             self.target_word = word_to_type.upper()  # Store in uppercase for comparison
             self.current_position = 0
-            self.typing_entry.config(state='normal')  # Enable for input
-            self.typing_entry.delete(0, tk.END)  # Clear any previous text
-            self.typing_entry.focus_set()  # Auto-focus for immediate typing
             
             # Highlight the first key on keyboard
             if self.target_word:
                 self.keyboard.highlight_key(self.target_word[0])
             
-            # Bind the key validation
-            self.typing_entry.bind('<KeyRelease>', self.validate_keystroke)
+            # Bind keyboard events directly to root window
+            self.root.bind('<KeyPress>', self.validate_keystroke)
+            self.root.focus_set()  # Ensure window has focus
             
             # Also disable the play button
             self.play_button.config(state="disabled")
@@ -516,11 +505,8 @@ class VideoPlayer:
         
         # Check if it matches the expected character
         if typed_char == expected_char:
-            # Update the entry to show only correct letters typed so far
+            # Advance position
             self.current_position += 1
-            correct_text = self.target_word[:self.current_position]
-            self.typing_entry.delete(0, tk.END)
-            self.typing_entry.insert(0, correct_text)
             
             # Update subtitle display to show next letter with current flash state
             if hasattr(self, 'current_subtitle_text') and self.current_subtitle_text:
@@ -544,26 +530,16 @@ class VideoPlayer:
             if self.current_position >= len(self.target_word):
                 print(f"DEBUG: Word complete: {self.target_word}")
                 self.cancel_hints()  # Cancel any pending hints
-                self.typing_entry.unbind('<KeyRelease>')  # Unbind to prevent further input
-                self.typing_entry.config(state='disabled')  # Disable after completion
+                self.root.unbind('<KeyPress>')  # Unbind to prevent further input
                 # Clear keyboard highlighting
                 self.keyboard.highlight_key('')  # Empty string will reset all keys
                 self.root.after(100, self.continue_playback)  # Small delay before continuing
-        else:
-            # Wrong key - remove it from the entry
-            correct_text = self.target_word[:self.current_position]
-            self.typing_entry.delete(0, tk.END)
-            self.typing_entry.insert(0, correct_text)
+        # else: Wrong key - just ignore it (no visual feedback needed)
     
     def continue_playback(self):
         if not self.player.is_playing():
             # Cancel any pending hints
             self.cancel_hints()
-            
-            # Clear and disable the typing entry
-            self.typing_entry.config(state='normal')
-            self.typing_entry.delete(0, tk.END)
-            self.typing_entry.config(state='disabled')
             
             # Re-enable the play button and clear typing flag
             self.play_button.config(state="normal")
