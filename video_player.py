@@ -843,7 +843,7 @@ class VideoPlayer:
                 # Generate sine wave
                 frames = int(sample_rate * duration)
                 arr = np.zeros((frames, 2), dtype=np.int16)
-                max_amplitude = 15000  # Moderate volume
+                max_amplitude = 7000  # Lower volume
                 
                 for j in range(frames):
                     t = float(j) / sample_rate
@@ -860,7 +860,7 @@ class VideoPlayer:
                 # Create and play sound immediately
                 sound = pygame.sndarray.make_sound(arr)
                 sound.play()
-                time.sleep(0.15)  # 150ms - same as beep duration, no gap
+                time.sleep(0.10)  # 100ms - overlap beeps for continuous sound
         
         # Play in separate thread to not block UI
         threading.Thread(target=play_beeps, daemon=True).start()
