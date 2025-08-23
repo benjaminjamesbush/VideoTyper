@@ -18,7 +18,7 @@ class VideoPlayer:
     def __init__(self, root):
         self.root = root
         self.root.title("VideoTyper - Basic Player")
-        self.root.geometry("800x600")
+        self.root.geometry("800x800")  # Made taller for keyboard
         
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
@@ -105,6 +105,11 @@ class VideoPlayer:
         self.time_label = ttk.Label(self.root, text="00:00 / 00:00")
         self.time_label.grid(row=4, column=0, pady=5)
         
+        # Row 5: Keyboard display
+        keyboard_frame = tk.Frame(self.root, bg='black')
+        keyboard_frame.grid(row=5, column=0, sticky="ew", padx=5, pady=5)
+        self.keyboard = self.create_keyboard_display(keyboard_frame)
+        
         # Typing-related variables
         self.target_word = ""
         self.current_position = 0
@@ -115,6 +120,96 @@ class VideoPlayer:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
         self.update_time()
+    
+    def create_keyboard_display(self, parent_frame):
+        """Create and return a keyboard display widget"""
+        
+        class KeyboardDisplay:
+            def __init__(self, parent):
+                # Create Canvas for keyboard
+                self.canvas = tk.Canvas(parent, width=620, height=160, bg='white', highlightthickness=1)
+                self.canvas.pack(pady=5)
+                
+                # Key dimensions
+                self.key_width = 40
+                self.key_height = 40
+                self.key_spacing = 5
+                self.row_spacing = 10
+                
+                # Starting positions for each row
+                self.row1_x = 20
+                self.row2_x = 40  # Half key offset (20px)
+                self.row3_x = 60  # Full key offset (40px)
+                self.base_y = 10
+                
+                # Define keyboard layout
+                self.row1_keys = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']']
+                self.row2_keys = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', "'"]
+                self.row3_keys = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/']
+                
+                # Store key rectangles for highlighting
+                self.key_rects = {}
+                self.key_labels = {}
+                
+                # Font for key labels
+                self.key_font = font.Font(family="Arial", size=16, weight="bold")
+                
+                # Draw the keyboard
+                self.draw_keyboard()
+                
+            def draw_keyboard(self):
+                """Draw all keys on the canvas"""
+                # Draw row 1 (Q-P, [, ])
+                y = self.base_y
+                for i, key in enumerate(self.row1_keys):
+                    x = self.row1_x + i * (self.key_width + self.key_spacing)
+                    self.draw_key(x, y, key)
+                
+                # Draw row 2 (A-L, ;, ')
+                y = self.base_y + self.key_height + self.row_spacing
+                for i, key in enumerate(self.row2_keys):
+                    x = self.row2_x + i * (self.key_width + self.key_spacing)
+                    self.draw_key(x, y, key)
+                
+                # Draw row 3 (Z-M, comma, period, slash)
+                y = self.base_y + 2 * (self.key_height + self.row_spacing)
+                for i, key in enumerate(self.row3_keys):
+                    x = self.row3_x + i * (self.key_width + self.key_spacing)
+                    self.draw_key(x, y, key)
+            
+            def draw_key(self, x, y, key_char):
+                """Draw a single key at the specified position"""
+                # Draw key rectangle
+                rect = self.canvas.create_rectangle(
+                    x, y, x + self.key_width, y + self.key_height,
+                    fill="white", outline="black", width=2
+                )
+                
+                # Draw key label
+                label = self.canvas.create_text(
+                    x + self.key_width // 2, y + self.key_height // 2,
+                    text=key_char, font=self.key_font, fill="black"
+                )
+                
+                # Store references for later highlighting
+                self.key_rects[key_char.upper()] = rect
+                self.key_labels[key_char.upper()] = label
+            
+            def highlight_key(self, key_char):
+                """Highlight a specific key"""
+                key_char = key_char.upper()
+                
+                # Reset all keys to default
+                for key in self.key_rects:
+                    self.canvas.itemconfig(self.key_rects[key], fill="white", outline="black", width=2)
+                    self.canvas.itemconfig(self.key_labels[key], fill="black")
+                
+                # Highlight the specified key
+                if key_char in self.key_rects:
+                    self.canvas.itemconfig(self.key_rects[key_char], fill="yellow", outline="red", width=3)
+                    self.canvas.itemconfig(self.key_labels[key_char], fill="red")
+        
+        return KeyboardDisplay(parent_frame)
         
     def open_video(self, file_path=None):
         # Reset typing state if we were in the middle of typing
@@ -383,6 +478,10 @@ class VideoPlayer:
             self.typing_entry.delete(0, tk.END)  # Clear any previous text
             self.typing_entry.focus_set()  # Auto-focus for immediate typing
             
+            # Highlight the first key on keyboard
+            if self.target_word:
+                self.keyboard.highlight_key(self.target_word[0])
+            
             # Bind the key validation
             self.typing_entry.bind('<KeyRelease>', self.validate_keystroke)
             
@@ -415,6 +514,11 @@ class VideoPlayer:
                 self.set_subtitle_text(self.current_subtitle_text, self.highlight_word, 
                                      self.current_position, flash_state)
             
+            # Update keyboard to highlight next key
+            if self.current_position < len(self.target_word):
+                next_char = self.target_word[self.current_position]
+                self.keyboard.highlight_key(next_char)
+            
             # Speak the letter that was just typed
             print(f"DEBUG: Speaking typed letter: {expected_char}")
             self.speak_letter(expected_char)
@@ -428,6 +532,8 @@ class VideoPlayer:
                 self.cancel_hints()  # Cancel any pending hints
                 self.typing_entry.unbind('<KeyRelease>')  # Unbind to prevent further input
                 self.typing_entry.config(state='disabled')  # Disable after completion
+                # Clear keyboard highlighting
+                self.keyboard.highlight_key('')  # Empty string will reset all keys
                 self.root.after(100, self.continue_playback)  # Small delay before continuing
         else:
             # Wrong key - remove it from the entry
