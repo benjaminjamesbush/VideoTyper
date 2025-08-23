@@ -843,7 +843,7 @@ class VideoPlayer:
                 # Generate sine wave
                 frames = int(sample_rate * duration)
                 arr = np.zeros((frames, 2), dtype=np.int16)
-                max_amplitude = 2000  # Lower volume for pleasant sound
+                max_amplitude = 15000  # Moderate volume
                 
                 for j in range(frames):
                     t = float(j) / sample_rate
