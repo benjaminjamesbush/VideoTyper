@@ -23,6 +23,8 @@ class VideoPlayer:
         
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
+        # Set movie volume to 200% (max for VLC)
+        self.player.audio_set_volume(200)
         self.current_media = None
         self.is_user_seeking = False
         self.subtitles = []  # List of (start_ms, end_ms, text) tuples
