@@ -68,6 +68,11 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
         if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "videotyper")
     }
 
+    /** Cut off speech mid-utterance (used when the anti-mash gray state begins). */
+    fun stopSpeaking() {
+        if (ttsReady) tts?.stop()
+    }
+
     /** Five overlapping beeps at random pitches (400-800 Hz), same recipe as the desktop app. */
     fun playReward() {
         scope.launch(Dispatchers.Default) {

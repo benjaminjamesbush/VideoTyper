@@ -268,11 +268,22 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             cooldownLenMs = (COOLDOWN_BASE_MS shl (wrongStreak - 1).coerceAtMost(3))
                 .coerceAtMost(COOLDOWN_MAX_MS)
         }
+        if (!isCoolingDown) {
+            // Gray = fully unresponsive: cut speech off mid-utterance too
+            audio.stopSpeaking()
+        }
         isCoolingDown = true
         cooldownJob?.cancel()
         cooldownJob = scope.launch {
             delay(cooldownLenMs)
             isCoolingDown = false
+            // Herald the return of interactivity with an immediate vocal prompt,
+            // then fall back to the regular hint cadence.
+            val current = round
+            if (current != null && isTyping && typedCount < current.word.length) {
+                audio.speak("Type ${current.word[typedCount].uppercaseChar()}")
+                scheduleHint(REPEAT_HINT_DELAY_MS)
+            }
         }
     }
 

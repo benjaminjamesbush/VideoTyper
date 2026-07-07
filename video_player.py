@@ -522,10 +522,10 @@ class VideoPlayer:
                     delattr(self, 'next_pause_subtitle_index')
                 
     def update_time(self):
-        # End of anti-mash cooldown: silently restore the UI
+        # End of anti-mash cooldown: restore the UI and announce that typing works again
         if self.cooldown_until and self.now_ms() >= self.cooldown_until:
             self.cooldown_until = 0
-            self.end_cooldown_display()
+            self.end_cooldown_display(announce=True)
 
         if self.player.get_media():
             current_time = self.player.get_time()
@@ -1090,6 +1090,9 @@ class VideoPlayer:
             engine = pyttsx3.init()
             engine.setProperty('rate', 150)  # Speed of speech
             engine.setProperty('volume', 0.9)  # Volume level
+            # Expose the engine so the main thread can cut speech off mid-utterance
+            # when the anti-mash gray state begins
+            self.tts_engine = engine
             
             # Prime the engine with a dummy word to work around pyttsx3 bug
             engine.say("ready")
@@ -1125,6 +1128,22 @@ class VideoPlayer:
     def speak_word(self, word):
         """Queue a word to be spoken by TTS"""
         self.tts_queue.put(word)
+
+    def stop_speech(self):
+        """Silence TTS immediately: drop queued utterances and cut off the current one.
+        Gray state means fully unresponsive - a voice still saying "Type A" would
+        contradict that."""
+        try:
+            while True:
+                self.tts_queue.get_nowait()
+        except queue.Empty:
+            pass
+        engine = getattr(self, 'tts_engine', None)
+        if engine:
+            try:
+                engine.stop()
+            except Exception as e:
+                print(f"DEBUG: TTS stop failed: {e}")
     
     def speak_letter(self, letter):
         """Play the sound for the typed letter"""
@@ -1143,14 +1162,19 @@ class VideoPlayer:
         self.cooldown_until = self.now_ms() + self.cooldown_len
         if not self.grayscale_mode:
             self.grayscale_mode = True
+            self.stop_speech()  # gray = fully unresponsive, mid-utterance included
             self.show_gray_video()
             self.refresh_typing_display()
 
-    def end_cooldown_display(self):
+    def end_cooldown_display(self, announce=False):
         if self.grayscale_mode:
             self.grayscale_mode = False
             self.gray_video_label.place_forget()
             self.refresh_typing_display()
+            # Herald the return of interactivity with an immediate vocal prompt
+            if announce and getattr(self, 'typing_in_progress', False) and \
+                    self.current_position < len(self.target_word):
+                self.give_hint()
 
     def reset_cooldown(self):
         self.cooldown_until = 0
