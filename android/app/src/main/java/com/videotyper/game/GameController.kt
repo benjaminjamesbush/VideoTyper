@@ -1,0 +1,321 @@
+package com.videotyper.game
+
+import android.content.Context
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import com.videotyper.player.SchemeDataSourceFactory
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * The VideoTyper game engine, ported from the desktop video_player.py.
+ *
+ * Flow: while a subtitle cue is on screen its chosen word is highlighted. When the cue ends,
+ * playback pauses, we seek to the middle of the cue interval (so the frame matches the line),
+ * the word is spoken via TTS and the child types it letter by letter on the system keyboard
+ * (wrong letters are ignored, correct ones play the letter sound). On completion a reward
+ * jingle plays, the whole line is replayed, and the movie continues to the next subtitle.
+ *
+ * The desktop app pre-extracted the entire SRT with ffmpeg; here we drive everything from
+ * ExoPlayer's live subtitle cue callbacks, which works for local files and network streams alike.
+ */
+@UnstableApi
+class GameController(context: Context, private val scope: CoroutineScope) : Player.Listener {
+
+    companion object {
+        private const val FIRST_HINT_DELAY_MS = 2_000L   // desktop: hint 2 s after pause/keystroke
+        private const val REPEAT_HINT_DELAY_MS = 5_000L  // then every 5 s while stuck
+        private const val REWARD_PAUSE_MS = 1_200L       // let the reward jingle play out
+        private const val REPLAY_MATCH_WINDOW_MS = 3_000L
+        private const val COMPLETED_CUE_MEMORY = 100
+    }
+
+    val audio = AudioFeedback(context, scope)
+
+    val player: ExoPlayer = ExoPlayer.Builder(
+        context,
+        NextRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+    )
+        .setTrackSelector(
+            DefaultTrackSelector(context).also {
+                it.parameters = it.buildUponParameters()
+                    .setSelectUndeterminedTextLanguage(true)
+                    .setPreferredTextLanguages("en", "eng")
+                    .build()
+            }
+        )
+        .setMediaSourceFactory(DefaultMediaSourceFactory(SchemeDataSourceFactory(context)))
+        .setSeekBackIncrementMs(10_000)
+        .setSeekForwardIncrementMs(10_000)
+        .build()
+        .also { it.addListener(this) }
+
+    // ---- UI-observable state ----
+    var subtitleText by mutableStateOf(""); private set
+    var highlightWord by mutableStateOf<String?>(null); private set
+    var typedCount by mutableStateOf(0); private set
+    var isTyping by mutableStateOf(false); private set
+    var isPlaying by mutableStateOf(false); private set
+    var statusMessage by mutableStateOf<String?>(null); private set
+    var hasMedia by mutableStateOf(false); private set
+
+    // ---- engine state ----
+    private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
+    private data class Round(val text: String, val word: String, val cueStartMs: Long)
+    private data class CompletedCue(val text: String, val startMs: Long)
+
+    private var activeCue: ActiveCue? = null
+    private var round: Round? = null
+    private val completedCues = ArrayDeque<CompletedCue>()
+    private var hintJob: Job? = null
+    private var resumeJob: Job? = null
+    private var gameSeekInProgress = false
+
+    // ---------------------------------------------------------------- media control
+
+    fun openUri(uri: Uri) {
+        resetGameState()
+        completedCues.clear()
+        statusMessage = null
+        player.setMediaItem(MediaItem.fromUri(uri))
+        player.prepare()
+        player.play()
+        hasMedia = true
+    }
+
+    fun playPause() {
+        if (isTyping) return // desktop blocks play/pause during a typing round
+        if (player.isPlaying) player.pause() else player.play()
+    }
+
+    fun stop() {
+        resetGameState()
+        player.pause()
+        player.seekTo(0)
+    }
+
+    /** User-initiated scrub. Blocked during typing rounds (the slider is disabled then too). */
+    fun seekTo(positionMs: Long) {
+        if (isTyping) return
+        activeCue = null
+        clearSubtitleDisplay()
+        player.seekTo(positionMs)
+    }
+
+    fun release() {
+        resetGameState()
+        player.release()
+        audio.release()
+    }
+
+    // ---------------------------------------------------------------- player events
+
+    override fun onCues(cueGroup: CueGroup) {
+        val text = cueGroup.cues
+            .joinToString(" ") { it.text?.toString() ?: "" }
+            .replace('\n', ' ')
+            .replace('\r', ' ')
+            .trim()
+        handleCueText(text)
+    }
+
+    override fun onIsPlayingChanged(playing: Boolean) {
+        isPlaying = playing
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        if (playbackState == Player.STATE_ENDED) {
+            // A cue that runs to the very end of the movie still gets its typing round.
+            handleCueText("")
+        }
+    }
+
+    override fun onPlayerError(error: PlaybackException) {
+        statusMessage = "Playback error: ${error.errorCodeName}"
+    }
+
+    override fun onTracksChanged(tracks: Tracks) {
+        val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        if (textGroups.isEmpty()) {
+            if (hasMedia && tracks.groups.isNotEmpty()) {
+                statusMessage = "No subtitle track in this video — typing game disabled"
+            }
+            return
+        }
+        statusMessage = null
+        // Preferred-language selection missed (e.g. track tagged with another language):
+        // force-select the first text track so the game always has cues.
+        if (textGroups.none { it.isSelected }) {
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setOverrideForType(TrackSelectionOverride(textGroups.first().mediaTrackGroup, 0))
+                .build()
+        }
+    }
+
+    // ---------------------------------------------------------------- game logic
+
+    private fun handleCueText(newText: String) {
+        if (round != null) return // during a typing round the display is frozen on the round's line
+
+        val previous = activeCue
+        if (newText == previous?.text) return
+
+        if (newText.isEmpty()) {
+            activeCue = null
+            clearSubtitleDisplay()
+        } else {
+            val positionMs = player.currentPosition
+            val alreadyDone = wasRecentlyCompleted(newText, positionMs)
+            val word = if (!alreadyDone && WordSelector.hasTypeableWords(newText)) {
+                WordSelector.selectWord(newText)
+            } else null
+            activeCue = ActiveCue(newText, positionMs, word, alreadyDone)
+            subtitleText = newText
+            highlightWord = word
+            typedCount = 0
+        }
+
+        // The cue that just ended is what the child types.
+        if (previous?.word != null && !previous.alreadyDone) {
+            startRound(previous, endMs = player.currentPosition)
+        }
+    }
+
+    private fun startRound(cue: ActiveCue, endMs: Long) {
+        val word = cue.word ?: return
+        player.pause()
+        round = Round(cue.text, word, cue.startMs)
+        activeCue = null
+
+        // Show the frame from the middle of the line while the child types.
+        gameSeekInProgress = true
+        player.seekTo((cue.startMs + endMs) / 2)
+
+        subtitleText = cue.text
+        highlightWord = word
+        typedCount = 0
+        isTyping = true
+
+        audio.speak(word)
+        scheduleHint(FIRST_HINT_DELAY_MS)
+    }
+
+    /** Feed of characters from the on-screen keyboard. Wrong letters are silently ignored. */
+    fun onTyped(input: String) {
+        val current = round ?: return
+        if (!isTyping) return
+        var pos = typedCount
+        for (ch in input) {
+            if (pos >= current.word.length) break
+            val expected = current.word[pos].uppercaseChar()
+            if (ch.uppercaseChar() == expected) {
+                pos++
+                audio.playLetter(expected)
+            }
+        }
+        if (pos != typedCount) {
+            typedCount = pos
+            if (pos >= current.word.length) {
+                completeRound(current)
+            } else {
+                scheduleHint(FIRST_HINT_DELAY_MS) // correct letter resets the hint timer
+            }
+        }
+    }
+
+    private fun completeRound(current: Round) {
+        cancelHints()
+        isTyping = false
+        rememberCompleted(current.text, current.cueStartMs)
+        audio.playReward()
+
+        resumeJob = scope.launch {
+            delay(REWARD_PAUSE_MS)
+            round = null
+            clearSubtitleDisplay()
+            // Replay the whole line as a reward, then playback simply continues.
+            gameSeekInProgress = true
+            player.seekTo(current.cueStartMs)
+            player.play()
+        }
+    }
+
+    override fun onPositionDiscontinuity(
+        oldPosition: Player.PositionInfo,
+        newPosition: Player.PositionInfo,
+        reason: Int
+    ) {
+        if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+            if (gameSeekInProgress) {
+                gameSeekInProgress = false
+            } else if (round == null) {
+                // Seek from outside the game (e.g. accessibility): forget the pending cue.
+                activeCue = null
+            }
+        }
+    }
+
+    private fun scheduleHint(initialDelayMs: Long) {
+        cancelHints()
+        hintJob = scope.launch {
+            delay(initialDelayMs)
+            while (true) {
+                val current = round ?: break
+                if (!isTyping || typedCount >= current.word.length) break
+                audio.speak("Type ${current.word[typedCount].uppercaseChar()}")
+                delay(REPEAT_HINT_DELAY_MS)
+            }
+        }
+    }
+
+    private fun cancelHints() {
+        hintJob?.cancel()
+        hintJob = null
+    }
+
+    private fun wasRecentlyCompleted(text: String, positionMs: Long): Boolean =
+        completedCues.any {
+            it.text == text && kotlin.math.abs(it.startMs - positionMs) < REPLAY_MATCH_WINDOW_MS
+        }
+
+    private fun rememberCompleted(text: String, startMs: Long) {
+        completedCues.addLast(CompletedCue(text, startMs))
+        while (completedCues.size > COMPLETED_CUE_MEMORY) completedCues.removeFirst()
+    }
+
+    private fun clearSubtitleDisplay() {
+        subtitleText = ""
+        highlightWord = null
+        typedCount = 0
+    }
+
+    private fun resetGameState() {
+        cancelHints()
+        resumeJob?.cancel()
+        resumeJob = null
+        round = null
+        activeCue = null
+        isTyping = false
+        gameSeekInProgress = false
+        clearSubtitleDisplay()
+    }
+}
