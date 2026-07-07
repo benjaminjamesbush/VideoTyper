@@ -15,6 +15,11 @@ import queue
 import pygame
 import numpy as np
 
+# Anti-mash cooldown: a wrong key silently turns the whole screen flat gray and ignores
+# all input; every press while gray extends it, and repeats double it (up to the max).
+COOLDOWN_BASE_MS = 1000
+COOLDOWN_MAX_MS = 8000
+
 class VideoPlayer:
     def __init__(self, root):
         self.root = root
@@ -36,6 +41,9 @@ class VideoPlayer:
         self.paused_subtitles = set()  # Track which subtitles we've already paused for
         self.flash_state = False  # For flashing next letter indicator
         self.flash_timer = None  # Timer for flashing effect
+        self.cooldown_until = 0   # Epoch ms; all typing input is ignored until this time
+        self.cooldown_len = 0     # Current cooldown length in ms (escalates per wrong key)
+        self.cooldown_streak = 0  # Consecutive wrong evaluations (reset by a correct letter)
         
         # Initialize TTS with a queue for thread safety
         self.tts_queue = queue.Queue()
@@ -115,6 +123,10 @@ class VideoPlayer:
         self.target_word = ""
         self.current_position = 0
         
+        # Full-window flat gray sheet shown while the anti-mash cooldown is active.
+        # Deliberately featureless: no text, no animation, no sound.
+        self.gray_overlay = tk.Frame(self.root, background="#7a7a7a")
+
         self.progress_bar.bind("<ButtonPress-1>", self.on_seek_start)
         self.progress_bar.bind("<ButtonRelease-1>", self.on_seek_end)
         
@@ -442,7 +454,8 @@ class VideoPlayer:
             
     def stop(self):
         self.player.stop()
-        
+        self.reset_cooldown()
+
         # Reset typing state if we were in the middle of typing
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
             self.typing_in_progress = False
@@ -501,6 +514,11 @@ class VideoPlayer:
                     delattr(self, 'next_pause_subtitle_index')
                 
     def update_time(self):
+        # End of anti-mash cooldown: silently restore the UI
+        if self.cooldown_until and self.now_ms() >= self.cooldown_until:
+            self.cooldown_until = 0
+            self.end_cooldown_display()
+
         if self.player.get_media():
             current_time = self.player.get_time()
             duration = self.player.get_length()
@@ -540,6 +558,7 @@ class VideoPlayer:
     def pause_for_typing(self):
         self.player.pause()
         self.typing_in_progress = True  # Block play button
+        self.reset_cooldown()  # Each word starts with a clean anti-mash slate
         
         # Mark this subtitle as paused
         if hasattr(self, 'next_pause_subtitle_index'):
@@ -631,15 +650,25 @@ class VideoPlayer:
         
     def validate_keystroke(self, event):
         """Validate each keystroke and only accept correct letters"""
+        # Anti-mash cooldown: while the screen is gray, every keypress silently extends it
+        if self.now_ms() < self.cooldown_until:
+            self.enter_cooldown(extend_only=True)
+            return
+
         if self.current_position >= len(self.target_word):
             return  # Already complete
-        
+
+        # Ignore modifier/navigation keys (they produce no printable character)
+        if not event.char or not event.char.isprintable():
+            return
+
         # Get the last typed character
         typed_char = event.char.upper()
         expected_char = self.target_word[self.current_position]
-        
+
         # Check if it matches the expected character
         if typed_char == expected_char:
+            self.cooldown_streak = 0  # Honest typing de-escalates future cooldowns
             # Advance position
             self.current_position += 1
             
@@ -673,12 +702,15 @@ class VideoPlayer:
                 self.play_reward_sound()
                 # Delay slightly longer to let reward sound play
                 self.root.after(1200, self.continue_playback)  # 1.2 seconds for the beeps
-        # else: Wrong key - just ignore it (no visual feedback needed)
+        else:
+            # Wrong key: no sound, no message - the whole screen just goes flat gray
+            self.enter_cooldown()
     
     def continue_playback(self):
         if not self.player.is_playing():
             # Cancel any pending hints
             self.cancel_hints()
+            self.reset_cooldown()
             
             # Re-enable the play button and clear typing flag
             self.play_button.config(state="normal")
@@ -1081,6 +1113,28 @@ class VideoPlayer:
         """Play the sound for the typed letter"""
         self.play_letter_sound(letter)
     
+    def now_ms(self):
+        return time.time() * 1000
+
+    def enter_cooldown(self, extend_only=False):
+        """Turn the whole screen flat gray and ignore input. Silent by design: any sound or
+        animation here would be entertaining enough to become the reward for mashing."""
+        if not extend_only:
+            self.cooldown_streak += 1
+            self.cooldown_len = min(COOLDOWN_BASE_MS * (2 ** (self.cooldown_streak - 1)), COOLDOWN_MAX_MS)
+        self.cooldown_until = self.now_ms() + self.cooldown_len
+        self.gray_overlay.place(x=0, y=0, relwidth=1, relheight=1)
+        self.gray_overlay.lift()
+
+    def end_cooldown_display(self):
+        self.gray_overlay.place_forget()
+
+    def reset_cooldown(self):
+        self.cooldown_until = 0
+        self.cooldown_len = 0
+        self.cooldown_streak = 0
+        self.end_cooldown_display()
+
     def start_flash_timer(self):
         """Start the flashing effect for the next letter indicator"""
         self.stop_flash_timer()  # Cancel any existing timer

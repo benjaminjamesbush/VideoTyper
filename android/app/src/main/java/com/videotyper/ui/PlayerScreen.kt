@@ -67,26 +67,39 @@ fun PlayerScreen(
     lastOpened: String?,
     onOpened: (String) -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .imePadding()
-    ) {
-        VideoSurface(controller, Modifier.fillMaxWidth().weight(1f))
-        SubtitleStrip(controller)
-        controller.statusMessage?.let {
-            Text(
-                it,
-                color = FlashRed,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .imePadding()
+        ) {
+            VideoSurface(controller, Modifier.fillMaxWidth().weight(1f))
+            SubtitleStrip(controller)
+            controller.statusMessage?.let {
+                Text(
+                    it,
+                    color = FlashRed,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                )
+            }
+            SeekBar(controller)
+            ControlsRow(controller, lastOpened, onOpened)
+            HiddenTypingField(controller)
+        }
+
+        // Anti-mash cooldown: a featureless flat gray sheet over everything (video included).
+        // Deliberately boring — no text, no animation, no sound — but impossible to miss.
+        // It does not consume touches or steal focus, so the IME stays up underneath.
+        if (controller.isCoolingDown) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF7A7A7A))
             )
         }
-        SeekBar(controller)
-        ControlsRow(controller, lastOpened, onOpened)
-        HiddenTypingField(controller)
     }
 }
 

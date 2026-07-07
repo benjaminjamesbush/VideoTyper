@@ -45,6 +45,11 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val REWARD_PAUSE_MS = 1_200L       // let the reward jingle play out
         private const val REPLAY_MATCH_WINDOW_MS = 3_000L
         private const val COMPLETED_CUE_MEMORY = 100
+
+        // Anti-mash cooldown: a wrong key silently turns the whole screen flat gray and
+        // ignores input; presses while gray extend it, repeats double it up to the max.
+        private const val COOLDOWN_BASE_MS = 1_000L
+        private const val COOLDOWN_MAX_MS = 8_000L
     }
 
     val audio = AudioFeedback(context, scope)
@@ -76,6 +81,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     var isPlaying by mutableStateOf(false); private set
     var statusMessage by mutableStateOf<String?>(null); private set
     var hasMedia by mutableStateOf(false); private set
+    var isCoolingDown by mutableStateOf(false); private set
 
     // ---- engine state ----
     private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
@@ -88,6 +94,9 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var hintJob: Job? = null
     private var resumeJob: Job? = null
     private var gameSeekInProgress = false
+    private var cooldownJob: Job? = null
+    private var cooldownLenMs = 0L
+    private var wrongStreak = 0
 
     // ---------------------------------------------------------------- media control
 
@@ -214,32 +223,65 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         highlightWord = word
         typedCount = 0
         isTyping = true
+        cancelCooldown() // each word starts with a clean anti-mash slate
 
         audio.speak(word)
         scheduleHint(FIRST_HINT_DELAY_MS)
     }
 
-    /** Feed of characters from the on-screen keyboard. Wrong letters are silently ignored. */
+    /**
+     * Feed of characters from the on-screen keyboard. A wrong key silently triggers the
+     * anti-mash cooldown (whole screen gray, input ignored); multi-character insertions
+     * (gesture typing, suggestion taps) are treated as mashing outright. Deliberately no
+     * sound or animation on the failure path — any reaction would reward mashing.
+     */
     fun onTyped(input: String) {
         val current = round ?: return
         if (!isTyping) return
-        var pos = typedCount
-        for (ch in input) {
-            if (pos >= current.word.length) break
-            val expected = current.word[pos].uppercaseChar()
-            if (ch.uppercaseChar() == expected) {
-                pos++
-                audio.playLetter(expected)
-            }
+        if (isCoolingDown) {
+            startCooldown(escalate = false) // any press while gray extends the gray
+            return
         }
-        if (pos != typedCount) {
-            typedCount = pos
-            if (pos >= current.word.length) {
+        if (input.length > 1) {
+            startCooldown(escalate = true)
+            return
+        }
+        val typed = input.single()
+        val expected = current.word[typedCount].uppercaseChar()
+        if (typed.uppercaseChar() == expected) {
+            wrongStreak = 0 // honest typing de-escalates future cooldowns
+            audio.playLetter(expected)
+            typedCount += 1
+            if (typedCount >= current.word.length) {
                 completeRound(current)
             } else {
                 scheduleHint(FIRST_HINT_DELAY_MS) // correct letter resets the hint timer
             }
+        } else {
+            startCooldown(escalate = true)
         }
+    }
+
+    private fun startCooldown(escalate: Boolean) {
+        if (escalate) {
+            wrongStreak += 1
+            cooldownLenMs = (COOLDOWN_BASE_MS shl (wrongStreak - 1).coerceAtMost(3))
+                .coerceAtMost(COOLDOWN_MAX_MS)
+        }
+        isCoolingDown = true
+        cooldownJob?.cancel()
+        cooldownJob = scope.launch {
+            delay(cooldownLenMs)
+            isCoolingDown = false
+        }
+    }
+
+    private fun cancelCooldown() {
+        cooldownJob?.cancel()
+        cooldownJob = null
+        isCoolingDown = false
+        cooldownLenMs = 0
+        wrongStreak = 0
     }
 
     private fun completeRound(current: Round) {
@@ -310,6 +352,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     private fun resetGameState() {
         cancelHints()
+        cancelCooldown()
         resumeJob?.cancel()
         resumeJob = null
         round = null
