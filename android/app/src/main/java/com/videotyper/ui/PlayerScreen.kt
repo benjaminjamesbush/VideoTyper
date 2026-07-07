@@ -54,7 +54,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -366,9 +365,18 @@ private fun ControlsRow(
 }
 
 /**
- * Invisible 1dp text field that summons GBoard during typing rounds. Its text is cleared after
- * every change; each change therefore carries just the newly typed characters, which are fed to
- * the game (wrong letters get ignored there).
+ * Invisible 1dp text field that summons the keyboard during typing rounds. Its text is cleared
+ * after every change, so each change carries just the newly typed characters, fed to the game
+ * (wrong letters get ignored there).
+ *
+ * Uses a Password keyboard type deliberately. A normal Text field lets the keyboard keep a
+ * "composing region" (the pending, underlined text used for prediction/autocorrect) that is
+ * separate from our field state and does NOT respect our reset-to-empty. Under fast mashing —
+ * especially during the gray cooldown, where nothing on screen confirms input — that buffer
+ * accumulates and is later re-presented as one big multi-character onValueChange, which the game
+ * reads as gesture-typing and turns into an endless re-triggering cooldown (the "stuck after
+ * gray" bug). Password type disables composing, suggestions, and swipe-typing entirely, so every
+ * tap commits immediately as a single clean character and swipe-to-type can't cheat the word.
  */
 @UnstableApi
 @Composable
@@ -384,9 +392,8 @@ private fun HiddenTypingField(controller: GameController) {
             fieldText = ""
         },
         keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Characters,
             autoCorrectEnabled = false,
-            keyboardType = KeyboardType.Text,
+            keyboardType = KeyboardType.Password,
         ),
         modifier = Modifier
             .size(1.dp)
