@@ -44,6 +44,8 @@ class VideoPlayer:
         self.cooldown_until = 0   # Epoch ms; all typing input is ignored until this time
         self.cooldown_len = 0     # Current cooldown length in ms (escalates per wrong key)
         self.cooldown_streak = 0  # Consecutive wrong evaluations (reset by a correct letter)
+        self.grayscale_mode = False   # True while the anti-mash cooldown desaturates the UI
+        self.gray_frame_image = None  # Pre-built grayscale still of the paused video frame
         
         # Initialize TTS with a queue for thread safety
         self.tts_queue = queue.Queue()
@@ -123,9 +125,10 @@ class VideoPlayer:
         self.target_word = ""
         self.current_position = 0
         
-        # Full-window flat gray sheet shown while the anti-mash cooldown is active.
-        # Deliberately featureless: no text, no animation, no sound.
-        self.gray_overlay = tk.Frame(self.root, background="#7a7a7a")
+        # Shown over the (paused) video while the anti-mash cooldown is active: a grayscale
+        # still of the current frame, or plain dim gray if the snapshot isn't available.
+        # The rest of the UI switches to grayscale colors rather than being covered.
+        self.gray_video_label = tk.Label(self.root, background="#555555", borderwidth=0)
 
         self.progress_bar.bind("<ButtonPress-1>", self.on_seek_start)
         self.progress_bar.bind("<ButtonRelease-1>", self.on_seek_end)
@@ -138,9 +141,11 @@ class VideoPlayer:
         """Create keyboard display directly on the combined canvas"""
         
         class KeyboardDisplay:
-            def __init__(self, canvas):
+            def __init__(self, canvas, color_fn):
                 # Use the provided canvas instead of creating new one
                 self.canvas = canvas
+                # Maps highlight colors to grays while the anti-mash cooldown is active
+                self.color_fn = color_fn
                 
                 # Key dimensions
                 self.key_width = 40
@@ -344,8 +349,9 @@ class VideoPlayer:
                 
                 # Highlight the specified key
                 if key_char in self.key_rects:
-                    self.canvas.itemconfig(self.key_rects[key_char], fill="yellow", outline="red", width=3)
-                    self.canvas.itemconfig(self.key_labels[key_char], fill="red")
+                    self.canvas.itemconfig(self.key_rects[key_char], fill=self.color_fn("yellow"),
+                                           outline=self.color_fn("red"), width=3)
+                    self.canvas.itemconfig(self.key_labels[key_char], fill=self.color_fn("red"))
                     
             def flash_key(self, key_char, flash_state):
                 """Flash a key between two color states"""
@@ -357,14 +363,16 @@ class VideoPlayer:
                 if key_char in self.key_rects:
                     if flash_state:
                         # Red background, yellow text
-                        self.canvas.itemconfig(self.key_rects[key_char], fill="red", outline="yellow", width=3)
-                        self.canvas.itemconfig(self.key_labels[key_char], fill="yellow")
+                        self.canvas.itemconfig(self.key_rects[key_char], fill=self.color_fn("red"),
+                                               outline=self.color_fn("yellow"), width=3)
+                        self.canvas.itemconfig(self.key_labels[key_char], fill=self.color_fn("yellow"))
                     else:
                         # Yellow background, red text
-                        self.canvas.itemconfig(self.key_rects[key_char], fill="yellow", outline="red", width=3)
-                        self.canvas.itemconfig(self.key_labels[key_char], fill="red")
-        
-        return KeyboardDisplay(self.combined_canvas)
+                        self.canvas.itemconfig(self.key_rects[key_char], fill=self.color_fn("yellow"),
+                                               outline=self.color_fn("red"), width=3)
+                        self.canvas.itemconfig(self.key_labels[key_char], fill=self.color_fn("red"))
+
+        return KeyboardDisplay(self.combined_canvas, self.game_color)
         
     def open_video(self, file_path=None):
         # Reset typing state if we were in the middle of typing
@@ -591,6 +599,10 @@ class VideoPlayer:
             midpoint = (start_ms + end_ms) // 2
             self.player.set_time(midpoint)
             print(f"DEBUG: Seeked to midpoint {midpoint}ms")
+
+            # Pre-build the grayscale still of this frame for the anti-mash cooldown
+            # (delayed so the seek has rendered before we snapshot)
+            self.root.after(600, self.prepare_gray_frame)
             
             # Store the interval for replay on continue
             self.replay_start = start_ms
@@ -865,6 +877,11 @@ class VideoPlayer:
     
     def set_subtitle_text(self, text, highlight_word=None, next_letter_pos=None, flash_red=False):
         """Update subtitle display with optional word highlighting and next letter indicator"""
+        # Palette goes gray while the anti-mash cooldown is active
+        white = self.game_color("white")
+        yellow = self.game_color("yellow")
+        red = self.game_color("red")
+
         # Clear only subtitle items (tagged as "subtitle"), not keyboard
         self.combined_canvas.delete("subtitle")
         
@@ -915,7 +932,7 @@ class VideoPlayer:
                 # Draw text before highlighted word
                 if before_text:
                     self.combined_canvas.create_text(current_x, center_y, text=before_text,
-                                                     font=self.subtitle_font, fill="white", anchor="w", tags="subtitle")
+                                                     font=self.subtitle_font, fill=white, anchor="w", tags="subtitle")
                     # Measure width of before text
                     temp_id = self.combined_canvas.create_text(0, 0, text=before_text, 
                                                                font=self.subtitle_font, anchor="w")
@@ -933,7 +950,7 @@ class VideoPlayer:
                     if next_letter_pos > 0:
                         completed_text = word_text[:next_letter_pos]
                         self.combined_canvas.create_text(current_x, center_y, text=completed_text,
-                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w", tags="subtitle")
+                                                         font=self.subtitle_font_bold, fill=yellow, anchor="w", tags="subtitle")
                         # Measure completed width
                         temp_id = self.combined_canvas.create_text(0, 0, text=completed_text,
                                                                    font=self.subtitle_font_bold, anchor="w")
@@ -954,12 +971,12 @@ class VideoPlayer:
                     next_letter_x = current_x + (bbox[2] - bbox[0]) / 2 if bbox else current_x
                     
                     # Create background rectangle (store ID for flashing)
-                    bg_color = "red" if flash_red else "yellow"
+                    bg_color = red if flash_red else yellow
                     self.flash_rect_id = self.combined_canvas.create_rectangle(bbox[0], bbox[1], bbox[2], bbox[3],
                                                                                fill=bg_color, outline="", tags="subtitle")
-                    
+
                     # Recreate letter on top (store ID for flashing)
-                    text_color = "yellow" if flash_red else "red"
+                    text_color = yellow if flash_red else red
                     self.flash_text_id = self.combined_canvas.create_text(current_x, center_y, text=next_letter,
                                                                           font=self.subtitle_font_bold, fill=text_color, anchor="w", tags="subtitle")
                     
@@ -970,7 +987,7 @@ class VideoPlayer:
                     if next_letter_pos + 1 < len(word_text):
                         remaining_text = word_text[next_letter_pos + 1:]
                         self.combined_canvas.create_text(current_x, center_y, text=remaining_text,
-                                                         font=self.subtitle_font_bold, fill="yellow", anchor="w", tags="subtitle")
+                                                         font=self.subtitle_font_bold, fill=yellow, anchor="w", tags="subtitle")
                         # Measure remaining width
                         temp_id = self.combined_canvas.create_text(0, 0, text=remaining_text,
                                                                    font=self.subtitle_font_bold, anchor="w")
@@ -981,7 +998,7 @@ class VideoPlayer:
                 else:
                     # Draw entire word highlighted
                     self.combined_canvas.create_text(current_x, center_y, text=word_text,
-                                                     font=self.subtitle_font_bold, fill="yellow", anchor="w", tags="subtitle")
+                                                     font=self.subtitle_font_bold, fill=yellow, anchor="w", tags="subtitle")
                     # Measure word width
                     temp_id = self.combined_canvas.create_text(0, 0, text=word_text,
                                                                font=self.subtitle_font_bold, anchor="w")
@@ -993,7 +1010,7 @@ class VideoPlayer:
                 # Draw text after highlighted word
                 if after_text:
                     self.combined_canvas.create_text(current_x, center_y, text=after_text,
-                                                     font=self.subtitle_font, fill="white", anchor="w", tags="subtitle")
+                                                     font=self.subtitle_font, fill=white, anchor="w", tags="subtitle")
                 
                 # Reposition keyboard to align highlighted letter with subtitle letter
                 if hasattr(self, 'keyboard') and next_letter_pos is not None and next_letter_pos < len(word_text):
@@ -1002,11 +1019,11 @@ class VideoPlayer:
             else:
                 # No match found, just show regular text
                 self.combined_canvas.create_text(center_x, center_y, text=text,
-                                                 font=self.subtitle_font, fill="white", anchor="center", tags="subtitle")
+                                                 font=self.subtitle_font, fill=white, anchor="center", tags="subtitle")
         else:
             # No highlighting, just show centered text
             self.combined_canvas.create_text(center_x, center_y, text=text,
-                                             font=self.subtitle_font, fill="white", anchor="center", tags="subtitle")
+                                             font=self.subtitle_font, fill=white, anchor="center", tags="subtitle")
     
     def load_letter_sounds(self):
         """Load all letter WAV files into memory"""
@@ -1117,23 +1134,87 @@ class VideoPlayer:
         return time.time() * 1000
 
     def enter_cooldown(self, extend_only=False):
-        """Turn the whole screen flat gray and ignore input. Silent by design: any sound or
-        animation here would be entertaining enough to become the reward for mashing."""
+        """Desaturate the whole screen and ignore input. Silent and static by design: any
+        sound or animation here would be entertaining enough to become the reward for
+        mashing, so the only feedback is the color draining out of everything."""
         if not extend_only:
             self.cooldown_streak += 1
             self.cooldown_len = min(COOLDOWN_BASE_MS * (2 ** (self.cooldown_streak - 1)), COOLDOWN_MAX_MS)
         self.cooldown_until = self.now_ms() + self.cooldown_len
-        self.gray_overlay.place(x=0, y=0, relwidth=1, relheight=1)
-        self.gray_overlay.lift()
+        if not self.grayscale_mode:
+            self.grayscale_mode = True
+            self.show_gray_video()
+            self.refresh_typing_display()
 
     def end_cooldown_display(self):
-        self.gray_overlay.place_forget()
+        if self.grayscale_mode:
+            self.grayscale_mode = False
+            self.gray_video_label.place_forget()
+            self.refresh_typing_display()
 
     def reset_cooldown(self):
         self.cooldown_until = 0
         self.cooldown_len = 0
         self.cooldown_streak = 0
         self.end_cooldown_display()
+
+    def game_color(self, color):
+        """Map the game's highlight colors to grays while grayscale mode is active"""
+        if not self.grayscale_mode:
+            return color
+        return {"white": "#cccccc", "yellow": "#aaaaaa", "red": "#666666"}.get(color, color)
+
+    def refresh_typing_display(self):
+        """Re-render the subtitle and keyboard so a grayscale-mode change shows immediately"""
+        if getattr(self, 'typing_in_progress', False) and self.current_subtitle_text:
+            self.set_subtitle_text(self.current_subtitle_text, self.highlight_word,
+                                   self.current_position, self.flash_state)
+            if self.target_word and self.current_position < len(self.target_word):
+                self.keyboard.highlight_key(self.target_word[self.current_position])
+
+    def show_gray_video(self):
+        """Cover the paused video with its pre-built grayscale still (or dim gray fallback)"""
+        if self.gray_frame_image is not None:
+            self.gray_video_label.configure(image=self.gray_frame_image)
+        else:
+            self.gray_video_label.configure(image="")
+        self.gray_video_label.place(in_=self.video_frame, x=0, y=0, relwidth=1, relheight=1)
+        self.gray_video_label.lift()
+
+    def prepare_gray_frame(self):
+        """Snapshot the paused frame and pre-convert it to grayscale, so entering cooldown
+        can show it instantly. Falls back to a plain gray panel if Pillow is unavailable."""
+        self.gray_frame_image = None
+        try:
+            from PIL import Image, ImageTk
+        except ImportError:
+            print("DEBUG: Pillow not installed - cooldown uses plain gray over video")
+            return
+        try:
+            import tempfile
+            path = os.path.join(tempfile.gettempdir(), "videotyper_gray_frame.png")
+            if os.path.exists(path):
+                os.remove(path)
+            self.player.video_take_snapshot(0, path, 0, 0)
+
+            def load(attempt=0):
+                if os.path.exists(path):
+                    try:
+                        img = Image.open(path).convert("L").convert("RGB")
+                        w = max(self.video_frame.winfo_width(), 1)
+                        h = max(self.video_frame.winfo_height(), 1)
+                        self.gray_frame_image = ImageTk.PhotoImage(img.resize((w, h)))
+                        # If cooldown started before the snapshot finished, upgrade it in place
+                        if self.grayscale_mode:
+                            self.gray_video_label.configure(image=self.gray_frame_image)
+                    except Exception as e:
+                        print(f"DEBUG: gray frame load failed: {e}")
+                elif attempt < 20:
+                    self.root.after(100, lambda: load(attempt + 1))
+
+            self.root.after(200, load)
+        except Exception as e:
+            print(f"DEBUG: gray frame snapshot failed: {e}")
 
     def start_flash_timer(self):
         """Start the flashing effect for the next letter indicator"""
@@ -1150,6 +1231,11 @@ class VideoPlayer:
     def flash_next_letter(self):
         """Toggle the flash state and update display"""
         if hasattr(self, 'typing_in_progress') and self.typing_in_progress:
+            # Hold the flash still while the anti-mash cooldown is active: a blinking
+            # letter is an animation, and animations during gray would reward mashing
+            if self.now_ms() < self.cooldown_until:
+                self.flash_timer = self.root.after(500, self.flash_next_letter)
+                return
             self.flash_state = not self.flash_state
             
             # Update the canvas items directly for flashing effect
@@ -1181,6 +1267,11 @@ class VideoPlayer:
     
     def give_hint(self):
         """Speak the next letter the user needs to type"""
+        # Vocal prompts are suspended while the anti-mash cooldown is active - a voice
+        # reacting to mashing would itself become the reward. Check again shortly.
+        if self.now_ms() < self.cooldown_until:
+            self.schedule_hint()
+            return
         if self.current_position < len(self.target_word):
             next_letter = self.target_word[self.current_position]
             hint_text = f"Type {next_letter}"

@@ -323,6 +323,12 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             while (true) {
                 val current = round ?: break
                 if (!isTyping || typedCount >= current.word.length) break
+                // Vocal prompts are suspended while the anti-mash grayscale is active —
+                // a voice reacting to mashing would itself become the reward.
+                if (isCoolingDown) {
+                    delay(250)
+                    continue
+                }
                 audio.speak("Type ${current.word[typedCount].uppercaseChar()}")
                 delay(REPEAT_HINT_DELAY_MS)
             }

@@ -1,6 +1,9 @@
 package com.videotyper.ui
 
+import android.graphics.ColorMatrixColorFilter
 import android.text.format.DateUtils
+import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,9 +40,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -52,8 +61,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.videotyper.R
 import com.videotyper.game.GameController
 import kotlinx.coroutines.delay
 
@@ -67,41 +76,48 @@ fun PlayerScreen(
     lastOpened: String?,
     onOpened: (String) -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .imePadding()
-        ) {
-            VideoSurface(controller, Modifier.fillMaxWidth().weight(1f))
-            SubtitleStrip(controller)
-            controller.statusMessage?.let {
-                Text(
-                    it,
-                    color = FlashRed,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                )
-            }
-            SeekBar(controller)
-            ControlsRow(controller, lastOpened, onOpened)
-            HiddenTypingField(controller)
-        }
-
-        // Anti-mash cooldown: a featureless flat gray sheet over everything (video included).
-        // Deliberately boring — no text, no animation, no sound — but impossible to miss.
-        // It does not consume touches or steal focus, so the IME stays up underneath.
-        if (controller.isCoolingDown) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF7A7A7A))
+    // Anti-mash cooldown: the whole screen (video included) drains to grayscale. The UI
+    // stays fully visible — clearly alive, just colorless — with no sound, no message, and
+    // nothing animating (the letter flash freezes and hints pause while gray).
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .imePadding()
+            .grayscale(controller.isCoolingDown)
+    ) {
+        VideoSurface(controller, Modifier.fillMaxWidth().weight(1f))
+        SubtitleStrip(controller)
+        controller.statusMessage?.let {
+            Text(
+                it,
+                color = FlashRed,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
             )
         }
+        SeekBar(controller)
+        ControlsRow(controller, lastOpened, onOpened)
+        HiddenTypingField(controller)
     }
 }
+
+/** Draws the content through a saturation-0 color filter when enabled. */
+private fun Modifier.grayscale(enabled: Boolean): Modifier =
+    if (!enabled) this
+    else drawWithCache {
+        val paint = Paint().apply {
+            colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+        }
+        onDrawWithContent {
+            drawIntoCanvas { canvas ->
+                canvas.saveLayer(Rect(0f, 0f, size.width, size.height), paint)
+                drawContent()
+                canvas.restore()
+            }
+        }
+    }
 
 @UnstableApi
 @Composable
@@ -109,16 +125,30 @@ private fun VideoSurface(controller: GameController, modifier: Modifier) {
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            PlayerView(ctx).apply {
+            // Inflated from XML because surface_type (TextureView) is inflation-only;
+            // TextureView is what lets the grayscale layer paint reach the video pixels.
+            (LayoutInflater.from(ctx).inflate(R.layout.player_view, null) as PlayerView).apply {
                 player = controller.player
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 // The game draws its own subtitles in the strip below the video.
                 subtitleView?.visibility = ViewGroup.GONE
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+            }
+        },
+        update = { playerView ->
+            if (controller.isCoolingDown) {
+                if (playerView.layerType != View.LAYER_TYPE_HARDWARE) {
+                    val grayPaint = android.graphics.Paint().apply {
+                        colorFilter = ColorMatrixColorFilter(
+                            android.graphics.ColorMatrix().apply { setSaturation(0f) }
+                        )
+                    }
+                    playerView.setLayerType(View.LAYER_TYPE_HARDWARE, grayPaint)
+                }
+            } else if (playerView.layerType != View.LAYER_TYPE_NONE) {
+                playerView.setLayerType(View.LAYER_TYPE_NONE, null)
             }
         }
     )
@@ -128,11 +158,13 @@ private fun VideoSurface(controller: GameController, modifier: Modifier) {
 @Composable
 private fun SubtitleStrip(controller: GameController) {
     // Flash the next letter between yellow-on-red and red-on-yellow every 500 ms while typing.
+    // The flash holds still during the anti-mash cooldown: a blinking letter is an animation,
+    // and any animation during the gray state would reward mashing.
     val flashOn by produceState(false, controller.isTyping) {
         value = false
         while (controller.isTyping) {
             delay(500)
-            value = !value
+            if (!controller.isCoolingDown) value = !value
         }
     }
 

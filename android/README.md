@@ -6,7 +6,7 @@ Native Android port of the desktop VideoTyper typing game (Kotlin, Jetpack Compo
 
 The movie plays with the app's own subtitle strip under the video. Each subtitle line gets one word pre-highlighted in yellow. When the line ends, playback pauses on a frame from the middle of the line, the word is spoken aloud, and the on-screen keyboard pops up. The child types the word letter by letter — wrong letters are ignored, each correct letter plays its letter sound, and the next letter flashes red/yellow in the subtitle. If they stall, TTS hints "Type X" (after 2 s, then every 5 s). On completion a reward jingle plays, the whole line replays, and the movie continues.
 
-Anti-mash: a wrong key (or gesture-typed/multi-character input) silently turns the entire screen flat gray and ignores all input for 1 s, doubling up to 8 s on repeats; any press while gray extends it. The failure path is intentionally free of sounds, messages, and animation so that mashing is never entertaining — the gray sheet is just an unmistakable "not accepting input" signal. A correct letter resets the escalation.
+Anti-mash: a wrong key (or gesture-typed/multi-character input) silently drains the entire screen — video included — to grayscale and ignores all input for 1 s, doubling up to 8 s on repeats; any press while gray extends it. While gray, the letter flash freezes and TTS hints pause, and the failure path is intentionally free of sounds, messages, and animation so that mashing is never entertaining; the UI stays fully visible (clearly alive, just colorless). An accepted correct letter resets the escalation. Video desaturation uses a TextureView surface with a saturation-0 hardware-layer paint; the Compose UI gets a saveLayer color filter.
 
 ## Opening videos
 
