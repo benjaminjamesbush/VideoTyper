@@ -12,6 +12,16 @@ https://github.com/user-attachments/assets/a00bf606-0342-4f8d-9b41-ad44c43a075d
 
 Open it on your phone and allow installing from unknown sources when prompted. Android 8.0+ (API 26), portrait phones. The build is signed, so later versions update cleanly over it. (Older versions and release notes: [all releases](https://github.com/benjaminjamesbush/VideoTyper/releases).)
 
+## Try a sample video
+
+To see the game right away, tap **Menu → Network** in the app, paste this URL, and press Play:
+
+```
+https://raw.githubusercontent.com/ietf-wg-cellar/matroska-test-files/master/test_files/test5.mkv
+```
+
+It's a ~40-second clip with an embedded English subtitle track — enough to see how the game works. (From the Matroska test suite; source footage is Blender's *Elephant's Dream*, [CC-BY 2.5](https://creativecommons.org/licenses/by/2.5/).)
+
 ## What videos work
 
 The game gets the words to type from the video's own subtitle track, so it needs a video with an **embedded text subtitle track** — in practice an **MKV with an SRT / subrip track**. These do **not** work:
