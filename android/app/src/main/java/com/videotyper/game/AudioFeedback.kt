@@ -68,6 +68,9 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
         if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "videotyper")
     }
 
+    /** Speak the "type this letter" hint for [letter]. */
+    fun speakLetterHint(letter: Char) = speak(letterHintText(letter))
+
     /** Cut off speech mid-utterance (used when the anti-mash gray state begins). */
     fun stopSpeaking() {
         if (ttsReady) tts?.stop()
@@ -127,5 +130,22 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
         soundPool.release()
         tts?.stop()
         tts?.shutdown()
+    }
+
+    companion object {
+        /** The exact string spoken for a letter hint ("Type X"), with Roman-numeral letters spelled
+         *  as homophones so TTS doesn't read them as numbers ("Type I" -> "type one"). */
+        fun letterHintText(letter: Char): String = "Type ${spokenLetter(letter)}"
+
+        private fun spokenLetter(c: Char): String = when (c.uppercaseChar()) {
+            'I' -> "eye"
+            'V' -> "vee"
+            'X' -> "ex"
+            'L' -> "el"
+            'C' -> "see"
+            'D' -> "dee"
+            'M' -> "em"
+            else -> c.uppercaseChar().toString()
+        }
     }
 }
