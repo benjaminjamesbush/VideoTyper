@@ -370,13 +370,19 @@ private fun ControlsRow(
  * (wrong letters get ignored there).
  *
  * Uses a Password keyboard type deliberately. A normal Text field lets the keyboard keep a
- * "composing region" (the pending, underlined text used for prediction/autocorrect) that is
- * separate from our field state and does NOT respect our reset-to-empty. Under fast mashing —
- * especially during the gray cooldown, where nothing on screen confirms input — that buffer
- * accumulates and is later re-presented as one big multi-character onValueChange, which the game
- * reads as gesture-typing and turns into an endless re-triggering cooldown (the "stuck after
- * gray" bug). Password type disables composing, suggestions, and swipe-typing entirely, so every
- * tap commits immediately as a single clean character and swipe-to-type can't cheat the word.
+ * committed text state. The old approach reset the field to "" after every keystroke and treated
+ * each onValueChange as only-new characters. Under fast mashing that reset races the IME: the
+ * keyboard's InputConnection still believes the field holds the previous letters, so it sends
+ * cumulative multi-character values ("EL", "ELM", ...) which the game reads as gesture-typing and
+ * turns into an endlessly re-triggering cooldown (the "stuck after gray" bug) — and the phantom
+ * values keep arriving after the child stops, which is why it only clears after a long wait.
+ *
+ * Fix: never reset mid-round. Let the field accumulate the round's keystrokes and feed only the
+ * DELTA (the characters appended since the last change) to the game. Because we always store back
+ * exactly what the IME sent, the two never disagree, so no phantom cumulative input can form. The
+ * buffer is cleared only at the start of each round, when no input is in flight. Password keyboard
+ * type additionally disables composing/suggestions/swipe so deltas are clean committed characters
+ * and swipe-to-type can't cheat the whole word in one go.
  */
 @UnstableApi
 @Composable
@@ -388,8 +394,15 @@ private fun HiddenTypingField(controller: GameController) {
     BasicTextField(
         value = fieldText,
         onValueChange = { newValue ->
-            if (newValue.isNotEmpty()) controller.onTyped(newValue)
-            fieldText = ""
+            // Feed only the characters appended since last time (suffix past the common prefix),
+            // so the game sees each newly typed letter exactly once and the field stays in sync
+            // with the IME instead of being force-reset out from under it.
+            var i = 0
+            val old = fieldText
+            while (i < old.length && i < newValue.length && old[i] == newValue[i]) i++
+            val added = newValue.substring(i)
+            if (added.isNotEmpty()) controller.onTyped(added)
+            fieldText = newValue
         },
         keyboardOptions = KeyboardOptions(
             autoCorrectEnabled = false,
@@ -403,7 +416,7 @@ private fun HiddenTypingField(controller: GameController) {
 
     LaunchedEffect(controller.isTyping) {
         if (controller.isTyping) {
-            fieldText = ""
+            fieldText = ""  // clean slate per round, while no input is in flight
             focusRequester.requestFocus()
             // Give focus a beat to land before asking for the IME.
             delay(50)
