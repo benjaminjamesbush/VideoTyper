@@ -7,6 +7,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import com.videotyper.data.Http
 import com.videotyper.data.PosterSearch
+import com.videotyper.data.SettingsStore
 import com.videotyper.data.ThumbnailChoice
 import com.videotyper.data.ThumbnailStore
 import com.videotyper.data.TitleParser
@@ -50,7 +51,10 @@ object ThumbnailLoader {
         val artUrl = when {
             remembered == null -> {
                 val parsed = TitleParser.parse(name)
-                val candidate = PosterSearch.search(parsed.title, preferTv = parsed.isTv).firstOrNull()
+                val tmdbKey = SettingsStore(context).tmdbKey()
+                val candidate = PosterSearch
+                    .search(parsed.title, preferTv = parsed.isTv, tmdbKey = tmdbKey)
+                    .firstOrNull()
                 store.setAutoArt(uri, candidate?.artUrl ?: "")
                 candidate?.artUrl
             }

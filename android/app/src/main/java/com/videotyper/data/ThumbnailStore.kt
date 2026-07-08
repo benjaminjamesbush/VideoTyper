@@ -64,6 +64,12 @@ class ThumbnailStore(context: Context) {
         prefs.edit().putString(AUTO_KEY, o.toString()).apply()
     }
 
+    /** Forget all remembered auto lookups so every auto-mode video re-searches (e.g. after the
+     *  TMDB key changes and previously-unmatched videos might now resolve). */
+    fun clearAllAutoArt() {
+        prefs.edit().remove(AUTO_KEY).apply()
+    }
+
     private fun readObj(key: String): JSONObject = try {
         JSONObject(prefs.getString(key, null) ?: "{}")
     } catch (e: Exception) {

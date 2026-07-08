@@ -31,6 +31,7 @@ import com.videotyper.game.GameController
 import com.videotyper.ui.MenuScreen
 import com.videotyper.ui.NetworkBrowserScreen
 import com.videotyper.ui.PlayerScreen
+import com.videotyper.ui.SettingsScreen
 import com.videotyper.ui.ThumbnailManagerScreen
 
 @UnstableApi
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
                 var showMenu by remember { mutableStateOf(!controller.hasMedia) }
                 var browseServer by remember { mutableStateOf<SmbServer?>(null) }
                 var manageVideo by remember { mutableStateOf<RecentVideo?>(null) }
+                var showSettings by remember { mutableStateOf(false) }
                 var recents by remember { mutableStateOf(recentsStore.recents()) }
                 var servers by remember { mutableStateOf(serversStore.servers()) }
                 var thumbRefresh by remember { mutableStateOf(0) }
@@ -74,6 +76,8 @@ class MainActivity : ComponentActivity() {
                         val server = browseServer
                         val manage = manageVideo
                         when {
+                            showSettings -> SettingsScreen(onBack = { showSettings = false })
+
                             manage != null -> ThumbnailManagerScreen(
                                 video = manage,
                                 onDone = {
@@ -103,6 +107,7 @@ class MainActivity : ComponentActivity() {
                                     serversStore.delete(it.id)
                                     servers = serversStore.servers()
                                 },
+                                onOpenSettings = { showSettings = true },
                                 onBack = { showMenu = false },
                             )
 

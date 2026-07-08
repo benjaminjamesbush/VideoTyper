@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.videotyper.data.PosterSearch
 import com.videotyper.data.RecentVideo
+import com.videotyper.data.SettingsStore
 import com.videotyper.data.ThumbnailChoice
 import com.videotyper.data.ThumbnailStore
 import com.videotyper.data.TitleParser
@@ -64,9 +65,10 @@ fun ThumbnailManagerScreen(video: RecentVideo, onDone: () -> Unit) {
     var searchTerm by remember { mutableStateOf(query) } // what we actually searched for
     val preferTv = remember(video.name) { TitleParser.parse(video.name).isTv }
 
+    val tmdbKey = remember { SettingsStore(context).tmdbKey() }
     val candidates by produceState<List<PosterSearch.Candidate>?>(initialValue = null, key1 = searchTerm) {
         value = null
-        value = PosterSearch.search(searchTerm, preferTv = preferTv)
+        value = PosterSearch.search(searchTerm, preferTv = preferTv, tmdbKey = tmdbKey)
     }
 
     fun choose(choice: ThumbnailChoice) {

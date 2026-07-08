@@ -22,16 +22,54 @@ object PosterSearch {
     )
 
     private const val ITUNES_SIZE = "600x600bb"
+    private const val TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 
-    suspend fun search(query: String, preferTv: Boolean = false): List<Candidate> {
+    /**
+     * Search all available sources and merge, preserving order. TMDB (when [tmdbKey] is set) is the
+     * primary source — deepest catalog, true 2:3 posters for movies and TV — followed by the
+     * keyless iTunes (movies) and TVmaze (TV) fallbacks.
+     */
+    suspend fun search(query: String, preferTv: Boolean = false, tmdbKey: String? = null): List<Candidate> {
         if (query.isBlank()) return emptyList()
+        val tmdb = if (!tmdbKey.isNullOrBlank()) searchTmdb(query, tmdbKey, preferTv) else emptyList()
         val itunes = searchItunesMovies(query)
         val tvmaze = searchTvmaze(query)
-        val merged = if (preferTv) tvmaze + itunes else itunes + tvmaze
-        // De-dup by artwork URL, preserving order.
+        val fallbacks = if (preferTv) tvmaze + itunes else itunes + tvmaze
         val seen = LinkedHashMap<String, Candidate>()
-        for (c in merged) seen.putIfAbsent(c.artUrl, c)
+        for (c in tmdb + fallbacks) seen.putIfAbsent(c.artUrl, c)
         return seen.values.toList()
+    }
+
+    private suspend fun searchTmdb(query: String, key: String, preferTv: Boolean): List<Candidate> {
+        val q = URLEncoder.encode(query, "UTF-8")
+        val movies = tmdbParse(
+            Http.getString("https://api.themoviedb.org/3/search/movie?api_key=$key&query=$q"),
+            titleKey = "title", dateKey = "release_date"
+        )
+        val tv = tmdbParse(
+            Http.getString("https://api.themoviedb.org/3/search/tv?api_key=$key&query=$q"),
+            titleKey = "name", dateKey = "first_air_date"
+        )
+        return if (preferTv) tv + movies else movies + tv
+    }
+
+    private fun tmdbParse(json: String?, titleKey: String, dateKey: String): List<Candidate> {
+        json ?: return emptyList()
+        val results = try {
+            JSONObject(json).optJSONArray("results") ?: return emptyList()
+        } catch (e: Exception) {
+            return emptyList()
+        }
+        val out = ArrayList<Candidate>()
+        for (i in 0 until results.length()) {
+            val o = results.getJSONObject(i)
+            val path = o.optString("poster_path")
+            if (path.isBlank() || path == "null") continue // no poster -> skip
+            val title = o.optString(titleKey).ifBlank { continue }
+            val year = o.optString(dateKey).take(4).takeIf { it.length == 4 }
+            out.add(Candidate(title, year, TMDB_IMAGE_BASE + path))
+        }
+        return out
     }
 
     private suspend fun searchItunesMovies(query: String): List<Candidate> {

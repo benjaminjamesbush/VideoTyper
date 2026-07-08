@@ -71,6 +71,7 @@ fun MenuScreen(
     onBrowseServer: (SmbServer) -> Unit,
     onAddServer: (SmbServer) -> Unit,
     onDeleteServer: (SmbServer) -> Unit,
+    onOpenSettings: () -> Unit,
     onBack: () -> Unit,
 ) {
     val filePicker = rememberLauncherForActivityResult(
@@ -87,10 +88,19 @@ fun MenuScreen(
             .imePadding()
             .padding(16.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = onBack) { Text("‹ Back") }
             Spacer(Modifier.width(12.dp))
-            Text("Choose a video", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "Choose a video",
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedButton(onClick = onOpenSettings) { Text("⚙") }
         }
 
         Spacer(Modifier.height(24.dp))
