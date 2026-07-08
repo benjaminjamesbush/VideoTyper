@@ -12,9 +12,12 @@ Anti-mash: a wrong key (or gesture-typed/multi-character input) silently drains 
 
 ## Opening videos
 
-- **Open** — system file picker (local storage, SD card, and any documents provider).
-- **Network** — enter a URL: `smb://user:pass@server/share/movie.mkv` (Windows/NAS shares, guest access if no credentials; jcifs-ng under the hood) or any `http(s)://` stream.
-- Subtitles are read from the embedded subtitle track (e.g. SRT inside MKV), same as the desktop app; the first English/undetermined text track is selected automatically.
+The **Menu** chip opens a separate, keyboard-free chooser screen with three sections:
+- **Recent** — a horizontally scrollable ribbon of poster-frame thumbnails of recently opened videos (tap to replay). Thumbnails are generated with `MediaMetadataRetriever` and disk-cached; `smb://` sources show a placeholder since decoding a frame over a share is slow. The list is a capped, persisted history.
+- **Local** — the system file picker (local storage, SD card, and any documents provider).
+- **Network** — a URL field: `smb://user:pass@server/share/movie.mkv` (Windows/NAS shares, guest access if no credentials; jcifs-ng under the hood) or any `http(s)://` stream.
+
+Subtitles are read from the embedded subtitle track (e.g. SRT inside MKV), same as the desktop app; the first English/undetermined text track is selected automatically.
 - E-AC-3/AC-3/DTS audio in MKV rips is handled by the bundled FFmpeg decoder extension (nextlib), since most phones lack those hardware decoders.
 
 ## Building
@@ -33,4 +36,6 @@ or open the `android/` folder in Android Studio. Install with `adb install app/b
 - `game/WordSelector.kt` — word-picking rules ported from the desktop app (skip `(SOUNDS)`, speaker labels, contraction fragments; prefer 3+ letter words).
 - `game/AudioFeedback.kt` — letter WAVs (SoundPool), TTS (word + hints), generated reward beeps (AudioTrack).
 - `player/SmbDataSource.kt` + `player/SchemeDataSource.kt` — `smb://` support for Media3.
-- `ui/PlayerScreen.kt` — Compose UI: video surface, subtitle strip with flashing next-letter, transport controls, hidden text field that summons the IME during typing rounds.
+- `ui/PlayerScreen.kt` — Compose UI: video surface, subtitle strip with flashing next-letter, transport controls, and the always-on hidden text field that keeps the keyboard up.
+- `ui/MenuScreen.kt` — the video chooser (recents ribbon, local picker, network URL); `ui/ThumbnailLoader.kt` generates/caches poster frames; `data/RecentsStore.kt` persists the recents list.
+- `MainActivity.kt` — swaps between the menu and player screens and records opened videos into recents.
