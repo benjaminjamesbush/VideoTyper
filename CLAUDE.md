@@ -2,7 +2,7 @@
 
 VideoTyper is a typing game application that plays videos with subtitles, periodically pausing to test the user's typing skills by having them type highlighted words from the subtitles.
 
-Two implementations live in this repo: the original desktop app (`video_player.py`, Python + VLC + tkinter) and a native Android port (`android/`, Kotlin + Jetpack Compose + Media3/ExoPlayer — see `android/README.md` for architecture and build instructions). The Android app is portrait-only, uses the system on-screen keyboard for typing, and plays videos from local storage, `smb://` network shares (jcifs-ng), or `http(s)://` URLs. Build note: the repo sits on a network share whose I/O is flaky under Gradle, so build output is routed to `C:\Users\Ben\.videotyper\` via `videotyper.localBuildDir` in `android/gradle.properties`, and builds should pass `--project-cache-dir C:\Users\Ben\.videotyper\gradle-cache`.
+Two implementations live in this repo: the original desktop app (`video_player.py`, Python + VLC + tkinter; see `DESKTOP.md`) and a native Android port (`android/`, Kotlin + Jetpack Compose + Media3/ExoPlayer — the maintained version, documented on the front-page `README.md`). The Android app is portrait-only, uses the system on-screen keyboard for typing, and plays videos from local storage, `smb://` network shares (jcifs-ng), or `http(s)://` URLs. Build note: the repo sits on a network share whose I/O is flaky under Gradle, so build output is routed to `C:\Users\Ben\.videotyper\` via `videotyper.localBuildDir` in `android/gradle.properties`, and builds should pass `--project-cache-dir C:\Users\Ben\.videotyper\gradle-cache`.
 
 ## Technology Decision
 
