@@ -1,6 +1,10 @@
 # VideoTyper
 
-A typing game that plays videos with subtitles and periodically pauses to have you type a highlighted word from the current subtitle line before the movie continues. It's built for early / assisted readers: the target word is spoken aloud, each correct letter plays its sound, wrong keys are ignored, and gentle hints nudge you along.
+A typing game that plays videos with subtitles and periodically pauses to have you type a highlighted word from the current subtitle line before the movie continues. The target word is spoken aloud, each correct letter plays its sound, wrong keys are ignored, and gentle hints nudge you along.
+
+## Demo
+
+https://github.com/user-attachments/assets/a00bf606-0342-4f8d-9b41-ad44c43a075d
 
 There are two implementations in this repo:
 
