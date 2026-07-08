@@ -13,11 +13,11 @@ Anti-mash: a wrong key (or gesture-typed/multi-character input) silently drains 
 ## Opening videos
 
 The **Menu** chip opens a separate, keyboard-free chooser screen with three sections:
-- **Recent** — a horizontally scrollable ribbon of poster-frame thumbnails of recently opened videos (tap to replay). Thumbnails are generated with `MediaMetadataRetriever` (local/http directly, `smb://` via a jcifs-backed `MediaDataSource`) and disk-cached. The list is a capped, persisted history.
+- **Recent** — a horizontally scrollable ribbon of portrait (2:3) poster thumbnails of recently opened videos (tap to replay). Thumbnails are Plex/Emby-style: an official poster matched from the filename via keyless sources (iTunes for movies, TVmaze for TV), downloaded and disk-cached, with a decoded video frame as fallback (`MediaMetadataRetriever`; `smb://` via a jcifs-backed `MediaDataSource`). Tap the **✎** on a poster to open the **thumbnail manager** (search by an editable title, pick from a poster grid, force the video frame, or return to Automatic). SMB recents are hidden unless their server answers when the chooser opens. The list is a capped, persisted history.
 - **Local** — the system file picker (local storage, SD card, and any documents provider).
 - **Network** — saved SMB servers you add once (host + optional label/user/pass/domain; persisted). Tap a server to **browse** its shares and folders (`NetworkBrowserScreen`, backed by jcifs-ng) and tap a video file to play it — no path typing. A direct `http(s)://` stream field is also provided. Guest access is used when credentials are blank.
 
-The transport buttons (Menu, Play, Stop) are never disabled; during a typing round they act as escape hatches (Menu leaves to the chooser, Play abandons the word and resumes, Stop resets).
+Menu and Stop are always available (Menu leaves to the chooser, Stop resets). Play is disabled during a typing round — there is deliberately no way to skip the word.
 
 Subtitles are read from the embedded subtitle track (e.g. SRT inside MKV), same as the desktop app; the first English/undetermined text track is selected automatically.
 - E-AC-3/AC-3/DTS audio in MKV rips is handled by the bundled FFmpeg decoder extension (nextlib), since most phones lack those hardware decoders.
@@ -39,5 +39,7 @@ or open the `android/` folder in Android Studio. Install with `adb install app/b
 - `game/AudioFeedback.kt` — letter WAVs (SoundPool), TTS (word + hints), generated reward beeps (AudioTrack).
 - `player/SmbDataSource.kt` + `player/SchemeDataSource.kt` — `smb://` support for Media3.
 - `ui/PlayerScreen.kt` — Compose UI: video surface, subtitle strip with flashing next-letter, transport controls, and the always-on hidden text field that keeps the keyboard up.
-- `ui/MenuScreen.kt` — the video chooser (recents ribbon, local picker, network URL); `ui/ThumbnailLoader.kt` generates/caches poster frames; `data/RecentsStore.kt` persists the recents list.
-- `MainActivity.kt` — swaps between the menu and player screens and records opened videos into recents.
+- `ui/MenuScreen.kt` — the video chooser (recents ribbon, local picker, saved SMB servers + add form, http stream); `ui/NetworkBrowserScreen.kt` — the SMB folder browser; `ui/ThumbnailManagerScreen.kt` — poster picker.
+- `ui/ThumbnailLoader.kt` — thumbnail resolver (online poster → frame fallback, cached); `data/PosterSearch.kt` (iTunes/TVmaze), `data/TitleParser.kt` (filename→title), `data/ThumbnailStore.kt` (per-video overrides), `data/Http.kt`.
+- `data/RecentsStore.kt` + `data/SmbServersStore.kt` — persisted recents and SMB servers; `player/SmbSupport.kt` + `player/SmbMediaDataSource.kt` — shared jcifs plumbing.
+- `MainActivity.kt` — swaps between menu, player, network-browser, and thumbnail-manager screens; records opened videos into recents.
