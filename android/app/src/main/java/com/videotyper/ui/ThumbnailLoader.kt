@@ -5,6 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import com.videotyper.data.Http
+import com.videotyper.data.PosterSearch
+import com.videotyper.data.ThumbnailChoice
+import com.videotyper.data.ThumbnailStore
+import com.videotyper.data.TitleParser
 import com.videotyper.player.SmbMediaDataSource
 import com.videotyper.player.SmbSupport
 import java.io.File
@@ -13,28 +18,62 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Generates and disk-caches a poster frame for a video URI. Local (content://, file://) and
- * http(s) sources decode directly through MediaMetadataRetriever; smb:// decodes over the share
- * via a jcifs-backed MediaDataSource. The first decode of a network video is slow, but the result
- * is cached to disk so the recents ribbon is instant thereafter.
+ * Resolves a video's thumbnail, Plex/Emby-style: an official online poster matched from the
+ * filename is preferred, with a decoded video frame as the fallback. The user can override the
+ * choice per video (a specific poster, or force the frame) via the thumbnail manager. Everything
+ * is disk-cached, so the recents ribbon is instant after the first resolve.
  */
 object ThumbnailLoader {
 
-    suspend fun load(context: Context, uriString: String): Bitmap? = withContext(Dispatchers.IO) {
-        val cacheFile = cacheFileFor(context, uriString)
-        if (cacheFile.exists()) {
-            BitmapFactory.decodeFile(cacheFile.absolutePath)?.let { return@withContext it }
+    /** Resolve the thumbnail for [uri] (a recents entry), using [name] to search online. */
+    suspend fun load(context: Context, uri: String, name: String): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val store = ThumbnailStore(context)
+            when (val choice = store.choiceFor(uri)) {
+                is ThumbnailChoice.Poster -> poster(context, choice.artUrl) ?: frame(context, uri)
+                ThumbnailChoice.Frame -> frame(context, uri)
+                ThumbnailChoice.Auto -> auto(context, uri, name, store)
+            }
         }
-        val bmp = extract(context, uriString) ?: return@withContext null
+
+    /** Download + cache + decode an online poster (used by the resolver and the manager grid). */
+    suspend fun poster(context: Context, artUrl: String): Bitmap? = withContext(Dispatchers.IO) {
+        val cacheFile = cacheFile(context, "posters", artUrl)
+        if (!cacheFile.exists()) {
+            if (!Http.downloadTo(artUrl, cacheFile)) return@withContext null
+        }
+        BitmapFactory.decodeFile(cacheFile.absolutePath)
+    }
+
+    private suspend fun auto(context: Context, uri: String, name: String, store: ThumbnailStore): Bitmap? {
+        val remembered = store.autoArt(uri)
+        val artUrl = when {
+            remembered == null -> {
+                val parsed = TitleParser.parse(name)
+                val candidate = PosterSearch.search(parsed.title, preferTv = parsed.isTv).firstOrNull()
+                store.setAutoArt(uri, candidate?.artUrl ?: "")
+                candidate?.artUrl
+            }
+            remembered.isBlank() -> null
+            else -> remembered
+        }
+        return artUrl?.let { poster(context, it) } ?: frame(context, uri)
+    }
+
+    private fun frame(context: Context, uriString: String): Bitmap? {
+        val cacheFile = cacheFile(context, "frames", uriString)
+        if (cacheFile.exists()) {
+            BitmapFactory.decodeFile(cacheFile.absolutePath)?.let { return it }
+        }
+        val bmp = extractFrame(context, uriString) ?: return null
         try {
             cacheFile.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         } catch (_: Exception) {
-            // A failed cache write just means we regenerate next time.
         }
-        bmp
+        return bmp
     }
 
-    private fun extract(context: Context, uriString: String): Bitmap? {
+    private fun extractFrame(context: Context, uriString: String): Bitmap? {
         val scheme = Uri.parse(uriString).scheme?.lowercase()
         val mmr = MediaMetadataRetriever()
         var smbSource: SmbMediaDataSource? = null
@@ -48,7 +87,7 @@ object ThumbnailLoader {
                 else -> mmr.setDataSource(context, Uri.parse(uriString))
             }
             val frame = mmr.getFrameAtTime(3_000_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: mmr.frameAtTime // fall back to whatever it can grab
+                ?: mmr.frameAtTime
             frame?.let { scaleDown(it, 320) }
         } catch (e: Exception) {
             null
@@ -70,10 +109,10 @@ object ThumbnailLoader {
         return Bitmap.createScaledBitmap(bmp, maxWidth, h, true)
     }
 
-    private fun cacheFileFor(context: Context, uriString: String): File {
-        val dir = File(context.cacheDir, "thumbs").apply { mkdirs() }
+    private fun cacheFile(context: Context, subdir: String, key: String): File {
+        val dir = File(context.cacheDir, subdir).apply { mkdirs() }
         val hash = MessageDigest.getInstance("MD5")
-            .digest(uriString.toByteArray())
+            .digest(key.toByteArray())
             .joinToString("") { "%02x".format(it) }
         return File(dir, "$hash.jpg")
     }

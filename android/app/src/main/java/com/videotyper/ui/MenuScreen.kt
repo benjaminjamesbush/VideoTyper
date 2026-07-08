@@ -65,7 +65,9 @@ private val PanelGray = Color(0xFF2A2A2A)
 fun MenuScreen(
     recents: List<RecentVideo>,
     servers: List<SmbServer>,
+    thumbRefresh: Int,
     onPlay: (String) -> Unit,
+    onManageThumbnail: (RecentVideo) -> Unit,
     onBrowseServer: (SmbServer) -> Unit,
     onAddServer: (SmbServer) -> Unit,
     onDeleteServer: (SmbServer) -> Unit,
@@ -117,8 +119,16 @@ fun MenuScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
-                items(visibleRecents) { video -> RecentCard(video, onClick = { onPlay(video.uri) }) }
+                items(visibleRecents) { video ->
+                    RecentCard(
+                        video = video,
+                        thumbRefresh = thumbRefresh,
+                        onClick = { onPlay(video.uri) },
+                        onManage = { onManageThumbnail(video) },
+                    )
+                }
             }
+            Text("Tip: tap ✎ on a poster to fix its thumbnail.", color = Color.Gray, fontSize = 11.sp)
         }
 
         Spacer(Modifier.height(28.dp))
@@ -255,24 +265,21 @@ private fun AddServerDialog(onDismiss: () -> Unit, onSave: (SmbServer) -> Unit) 
 }
 
 @Composable
-private fun RecentCard(video: RecentVideo, onClick: () -> Unit) {
+private fun RecentCard(video: RecentVideo, thumbRefresh: Int, onClick: () -> Unit, onManage: () -> Unit) {
     val context = LocalContext.current
-    val thumb by produceState<Bitmap?>(initialValue = null, key1 = video.uri) {
-        value = ThumbnailLoader.load(context, video.uri)
+    // Portrait poster shape (2:3) like Plex/Emby; frame-grab fallbacks are center-cropped into it.
+    val thumb by produceState<Bitmap?>(initialValue = null, key1 = video.uri, key2 = thumbRefresh) {
+        value = ThumbnailLoader.load(context, video.uri, video.name)
     }
 
-    Column(
-        modifier = Modifier
-            .width(160.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-    ) {
+    Column(modifier = Modifier.width(120.dp)) {
         Box(
             modifier = Modifier
-                .width(160.dp)
-                .height(90.dp)
+                .width(120.dp)
+                .height(180.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(PanelGray),
+                .background(PanelGray)
+                .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             val t = thumb
@@ -286,6 +293,18 @@ private fun RecentCard(video: RecentVideo, onClick: () -> Unit) {
             } else {
                 Text("▶", color = Color.Gray, fontSize = 28.sp)
             }
+            // Edit affordance to fix the thumbnail.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xCC000000))
+                    .clickable(onClick = onManage)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("✎", color = Color.White, fontSize = 14.sp)
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -294,7 +313,7 @@ private fun RecentCard(video: RecentVideo, onClick: () -> Unit) {
             fontSize = 12.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(160.dp)
+            modifier = Modifier.width(120.dp)
         )
     }
 }

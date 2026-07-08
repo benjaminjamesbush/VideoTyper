@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
+import com.videotyper.data.RecentVideo
 import com.videotyper.data.RecentsStore
 import com.videotyper.data.SmbServer
 import com.videotyper.data.SmbServersStore
@@ -30,6 +31,7 @@ import com.videotyper.game.GameController
 import com.videotyper.ui.MenuScreen
 import com.videotyper.ui.NetworkBrowserScreen
 import com.videotyper.ui.PlayerScreen
+import com.videotyper.ui.ThumbnailManagerScreen
 
 @UnstableApi
 class MainActivity : ComponentActivity() {
@@ -52,8 +54,10 @@ class MainActivity : ComponentActivity() {
                 // No media loaded yet? Start on the menu so there's always a way to pick a video.
                 var showMenu by remember { mutableStateOf(!controller.hasMedia) }
                 var browseServer by remember { mutableStateOf<SmbServer?>(null) }
+                var manageVideo by remember { mutableStateOf<RecentVideo?>(null) }
                 var recents by remember { mutableStateOf(recentsStore.recents()) }
                 var servers by remember { mutableStateOf(serversStore.servers()) }
+                var thumbRefresh by remember { mutableStateOf(0) }
 
                 val open: (String) -> Unit = { uriString ->
                     persistUriPermissionIfPossible(uriString)
@@ -68,7 +72,16 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = Color.Black) {
                     Box(Modifier.systemBarsPadding()) {
                         val server = browseServer
+                        val manage = manageVideo
                         when {
+                            manage != null -> ThumbnailManagerScreen(
+                                video = manage,
+                                onDone = {
+                                    manageVideo = null
+                                    thumbRefresh++ // re-resolve the ribbon with the new choice
+                                },
+                            )
+
                             server != null -> NetworkBrowserScreen(
                                 server = server,
                                 onPlay = open,
@@ -78,7 +91,9 @@ class MainActivity : ComponentActivity() {
                             showMenu -> MenuScreen(
                                 recents = recents,
                                 servers = servers,
+                                thumbRefresh = thumbRefresh,
                                 onPlay = open,
+                                onManageThumbnail = { manageVideo = it },
                                 onBrowseServer = { browseServer = it },
                                 onAddServer = {
                                     serversStore.save(it)
