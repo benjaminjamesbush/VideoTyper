@@ -1298,7 +1298,9 @@ class VideoPlayer:
             return
         if self.current_position < len(self.target_word):
             next_letter = self.target_word[self.current_position]
-            hint_text = f"Type {next_letter}"
+            # "the letter X" — not "Type X" — so TTS doesn't read a Roman-numeral letter
+            # (I, V, X, ...) as a number ("Type I" would be spoken "type one").
+            hint_text = f"Type the letter {next_letter}"
             self.speak_word(hint_text)
             
             # Schedule the next hint in 5 seconds

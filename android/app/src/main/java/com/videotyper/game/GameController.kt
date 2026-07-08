@@ -287,7 +287,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             // then fall back to the regular hint cadence.
             val current = round
             if (current != null && isTyping && typedCount < current.word.length) {
-                audio.speak("Type ${current.word[typedCount].uppercaseChar()}")
+                audio.speak("Type the letter ${current.word[typedCount].uppercaseChar()}")
                 scheduleHint(REPEAT_HINT_DELAY_MS)
             }
         }
@@ -346,7 +346,9 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
                     delay(250)
                     continue
                 }
-                audio.speak("Type ${current.word[typedCount].uppercaseChar()}")
+                // "the letter X" — not "Type X" — so TTS doesn't read a Roman-numeral letter
+                // (I, V, X, ...) as a number ("Type I" would be spoken "type one").
+                audio.speak("Type the letter ${current.word[typedCount].uppercaseChar()}")
                 delay(REPEAT_HINT_DELAY_MS)
             }
         }
