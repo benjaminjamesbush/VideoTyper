@@ -43,6 +43,7 @@ Thumbs.db
 android/.gradle/
 android/local.properties
 android/.kotlin/
+android/keys.properties
 *.apk
 *.aab
 

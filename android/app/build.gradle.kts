@@ -1,9 +1,34 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Bundled TMDB API key, read at build time from the TMDB_API_KEY env var or keys.properties
+// (both untracked). Released APKs carry it so posters work with no per-user signup; source builds
+// without it fall back to the keyless iTunes/TVmaze sources plus the in-app key override.
+val tmdbApiKey: String = run {
+    val fromEnv = System.getenv("TMDB_API_KEY")
+    val fromProps = rootProject.file("keys.properties").takeIf { it.exists() }?.let { f ->
+        Properties().apply { f.inputStream().use { load(it) } }.getProperty("TMDB_API_KEY")
+    }
+    (fromEnv ?: fromProps ?: "").trim()
+}
+
+if (tmdbApiKey.isBlank()) {
+    logger.warn(
+        "\n" +
+            "############################################################\n" +
+            "##  WARNING: TMDB_API_KEY is not set for this build.       ##\n" +
+            "##  Poster lookups will use the keyless iTunes/TVmaze      ##\n" +
+            "##  sources only (smaller catalog). Release builds should  ##\n" +
+            "##  set it in android/keys.properties (TMDB_API_KEY=...)   ##\n" +
+            "##  or the TMDB_API_KEY environment variable.              ##\n" +
+            "############################################################\n"
+    )
 }
 
 android {
@@ -16,6 +41,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
     buildTypes {
@@ -31,6 +57,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

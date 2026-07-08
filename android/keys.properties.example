@@ -1,0 +1,4 @@
+# Copy this file to keys.properties (untracked) and paste your TMDB v3 API key.
+# Release builds embed this so users don't need their own key. Without it, the app
+# still works using the keyless iTunes/TVmaze poster sources and the in-app key field.
+TMDB_API_KEY=

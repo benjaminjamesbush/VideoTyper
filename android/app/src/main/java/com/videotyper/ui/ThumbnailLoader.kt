@@ -51,7 +51,7 @@ object ThumbnailLoader {
         val artUrl = when {
             remembered == null -> {
                 val parsed = TitleParser.parse(name)
-                val tmdbKey = SettingsStore(context).tmdbKey()
+                val tmdbKey = SettingsStore(context).effectiveTmdbKey()
                 val candidate = PosterSearch
                     .search(parsed.title, preferTv = parsed.isTv, tmdbKey = tmdbKey)
                     .firstOrNull()

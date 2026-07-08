@@ -54,6 +54,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var key by remember { mutableStateOf(store.tmdbKey() ?: "") }
     var status by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+    val hasBundledKey = remember { store.bundledTmdbKey() != null }
 
     Column(
         modifier = Modifier
@@ -74,8 +75,14 @@ fun SettingsScreen(onBack: () -> Unit) {
         Text("Movie & TV posters (TMDB)", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Recent videos are matched to official posters using The Movie Database (TMDB). It's " +
-                "free but needs your own API key:",
+            if (hasBundledKey) {
+                "Recent videos are matched to official posters via The Movie Database (TMDB). " +
+                    "A key is already built in, so this works out of the box — you only need your " +
+                    "own key if you'd rather use your own quota. To get one (free):"
+            } else {
+                "Recent videos are matched to official posters via The Movie Database (TMDB). " +
+                    "This build has no key, so enter your own (free) to enable it:"
+            },
             color = Color.Gray,
             fontSize = 13.sp
         )
@@ -152,8 +159,8 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
         Text(
-            "Without a key, posters still come from the free iTunes and TVmaze sources (smaller " +
-                "catalog), with a video frame as the final fallback.",
+            "When a poster isn't on TMDB, the app falls back to the free iTunes and TVmaze " +
+                "sources, then a video frame.",
             color = Color.Gray,
             fontSize = 12.sp
         )
