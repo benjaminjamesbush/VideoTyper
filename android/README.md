@@ -13,9 +13,11 @@ Anti-mash: a wrong key (or gesture-typed/multi-character input) silently drains 
 ## Opening videos
 
 The **Menu** chip opens a separate, keyboard-free chooser screen with three sections:
-- **Recent** — a horizontally scrollable ribbon of poster-frame thumbnails of recently opened videos (tap to replay). Thumbnails are generated with `MediaMetadataRetriever` and disk-cached; `smb://` sources show a placeholder since decoding a frame over a share is slow. The list is a capped, persisted history.
+- **Recent** — a horizontally scrollable ribbon of poster-frame thumbnails of recently opened videos (tap to replay). Thumbnails are generated with `MediaMetadataRetriever` (local/http directly, `smb://` via a jcifs-backed `MediaDataSource`) and disk-cached. The list is a capped, persisted history.
 - **Local** — the system file picker (local storage, SD card, and any documents provider).
-- **Network** — a URL field: `smb://user:pass@server/share/movie.mkv` (Windows/NAS shares, guest access if no credentials; jcifs-ng under the hood) or any `http(s)://` stream.
+- **Network** — saved SMB servers you add once (host + optional label/user/pass/domain; persisted). Tap a server to **browse** its shares and folders (`NetworkBrowserScreen`, backed by jcifs-ng) and tap a video file to play it — no path typing. A direct `http(s)://` stream field is also provided. Guest access is used when credentials are blank.
+
+The transport buttons (Menu, Play, Stop) are never disabled; during a typing round they act as escape hatches (Menu leaves to the chooser, Play abandons the word and resumes, Stop resets).
 
 Subtitles are read from the embedded subtitle track (e.g. SRT inside MKV), same as the desktop app; the first English/undetermined text track is selected automatically.
 - E-AC-3/AC-3/DTS audio in MKV rips is handled by the bundled FFmpeg decoder extension (nextlib), since most phones lack those hardware decoders.
