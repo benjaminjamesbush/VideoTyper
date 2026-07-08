@@ -8,15 +8,16 @@ import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.isImeVisible
@@ -68,6 +69,12 @@ import kotlinx.coroutines.delay
 private val HighlightYellow = Color(0xFFFFEB3B)
 private val FlashRed = Color(0xFFE53935)
 
+// Vertical space kept for the subtitle strip + transport controls, so the video can never grow
+// large enough to push them off-screen (the failure mode on near-square foldable displays). Sized
+// to what that bottom UI actually needs (subtitle min ~110dp + seek/controls ~110dp), measured so
+// the cap does NOT bind on a normal phone — there a full-width 16:9 video keeps its full size.
+private val BottomUiReserve = 220.dp
+
 @UnstableApi
 @Composable
 fun PlayerScreen(
@@ -75,36 +82,44 @@ fun PlayerScreen(
     onMenuClick: () -> Unit,
 ) {
     // The soft keyboard is a permanent fixture: typing is ~90% of the app, so it stays up for
-    // the whole session rather than playing peek-a-boo per round. The layout reserves space for
-    // it with imePadding, so everything lives in the band above the keyboard: the video pinned
-    // at the very top at full width and a fixed 16:9 height, the subtitle directly beneath it,
-    // and a flexible spacer pushing the compact transport controls down to just above the keys.
-    // Because the keyboard never hides, that band is a constant size and nothing ever reflows.
+    // the whole session rather than playing peek-a-boo per round. imePadding reserves space for
+    // it, so everything lives in the band above the keyboard.
+    //
+    // The video is pinned at the top, full width, at a 16:9 height — but capped so the subtitle
+    // and controls are always reserved space first (BottomUiReserve). On a tall phone the cap
+    // never binds (16:9 fits easily); on a near-square foldable a full-width 16:9 video would
+    // otherwise eat the whole height, so it's shortened (letterboxed) instead of hiding the
+    // controls. Because the keyboard never hides, this band is a constant size and nothing
+    // reflows during play.
     //
     // Anti-mash cooldown: the whole UI (video included) drains to grayscale — still fully
     // visible, just colorless — with no sound, message, or animation while gray.
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .imePadding()
             .grayscale(controller.isCoolingDown)
     ) {
-        VideoSurface(controller, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-        SubtitleStrip(controller)
-        controller.statusMessage?.let {
-            Text(
-                it,
-                color = FlashRed,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-            )
+        val videoHeight = minOf(maxWidth * 9f / 16f, maxHeight - BottomUiReserve)
+            .coerceAtLeast(120.dp)
+        Column(Modifier.fillMaxSize()) {
+            VideoSurface(controller, Modifier.fillMaxWidth().height(videoHeight))
+            SubtitleStrip(controller)
+            controller.statusMessage?.let {
+                Text(
+                    it,
+                    color = FlashRed,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            SeekBar(controller)
+            ControlsRow(controller, onMenuClick)
+            HiddenTypingField(controller)
         }
-        Spacer(Modifier.weight(1f))
-        SeekBar(controller)
-        ControlsRow(controller, onMenuClick)
-        HiddenTypingField(controller)
     }
 }
 
