@@ -9,6 +9,8 @@ import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Shared jcifs-ng plumbing used by playback (SmbDataSource), the network browser, and thumbnail
@@ -39,6 +41,23 @@ object SmbSupport {
         val uri = Uri.parse(uriString)
         val ctx = contextFor(uri.userInfo)
         return SmbFile(uriString, ctx)
+    }
+
+    /**
+     * Quickly test whether an smb:// video is reachable right now (server up, share mounted, file
+     * present) using short timeouts so an offline server doesn't stall the UI. Used to hide SMB
+     * recents whose server isn't currently available.
+     */
+    suspend fun isReachable(uriString: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val file = smbFile(uriString).apply {
+                connectTimeout = 3_000
+                readTimeout = 3_000
+            }
+            file.exists()
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /**

@@ -48,7 +48,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.videotyper.data.RecentVideo
 import com.videotyper.data.SmbServer
+import com.videotyper.player.SmbSupport
 import java.util.UUID
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 private val PanelGray = Color(0xFF2A2A2A)
 
@@ -90,14 +94,30 @@ fun MenuScreen(
         Spacer(Modifier.height(24.dp))
 
         SectionLabel("Recent")
-        if (recents.isEmpty()) {
+        // SMB recents are shown only if their server answers right now (checked when this screen
+        // opens, with short timeouts); local/http recents always show. Non-network ones appear
+        // immediately, network ones pop in once confirmed reachable.
+        val visibleRecents by produceState(
+            initialValue = recents.filterNot { it.uri.startsWith("smb://") },
+            key1 = recents
+        ) {
+            val reachable = coroutineScope {
+                recents.filter { it.uri.startsWith("smb://") }
+                    .map { r -> async { if (SmbSupport.isReachable(r.uri)) r.uri else null } }
+                    .awaitAll()
+                    .filterNotNull()
+                    .toSet()
+            }
+            value = recents.filter { !it.uri.startsWith("smb://") || it.uri in reachable }
+        }
+        if (visibleRecents.isEmpty()) {
             Text("Nothing yet — open a local or network video below.", color = Color.Gray, fontSize = 13.sp)
         } else {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
-                items(recents) { video -> RecentCard(video, onClick = { onPlay(video.uri) }) }
+                items(visibleRecents) { video -> RecentCard(video, onClick = { onPlay(video.uri) }) }
             }
         }
 

@@ -298,8 +298,8 @@ private fun ControlsRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // These are never disabled — during a typing round they act as escape hatches
-        // (Menu leaves to the chooser, Play skips the word and resumes, Stop resets).
+        // Menu and Stop are always available (Menu leaves to the chooser, Stop resets). Play is
+        // disabled during a typing round — there is deliberately no way to skip the word.
         OutlinedButton(
             onClick = onMenuClick,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -307,6 +307,7 @@ private fun ControlsRow(
         ) { Text("Menu") }
         Button(
             onClick = { controller.playPause() },
+            enabled = !controller.isTyping,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             modifier = Modifier.weight(1f)
         ) { Text(if (controller.isPlaying) "Pause" else "Play") }

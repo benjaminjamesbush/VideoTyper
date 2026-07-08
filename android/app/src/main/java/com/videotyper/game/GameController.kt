@@ -111,12 +111,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     }
 
     fun playPause() {
-        if (isTyping) {
-            // Escape hatch during a typing round: abandon the word and resume the movie.
-            resetGameState()
-            player.play()
-            return
-        }
+        if (isTyping) return // no skipping a typing round via Play
         if (player.isPlaying) player.pause() else player.play()
     }
 
