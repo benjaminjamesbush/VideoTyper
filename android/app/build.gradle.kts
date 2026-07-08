@@ -7,16 +7,22 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Bundled TMDB API key, read at build time from the TMDB_API_KEY env var or keys.properties
-// (both untracked). Released APKs carry it so posters work with no per-user signup; source builds
-// without it fall back to the keyless iTunes/TVmaze sources plus the in-app key override.
-val tmdbApiKey: String = run {
-    val fromEnv = System.getenv("TMDB_API_KEY")
-    val fromProps = rootProject.file("keys.properties").takeIf { it.exists() }?.let { f ->
-        Properties().apply { f.inputStream().use { load(it) } }.getProperty("TMDB_API_KEY")
-    }
-    (fromEnv ?: fromProps ?: "").trim()
+// Untracked secrets (TMDB key + release-signing credentials), read at build time from
+// android/keys.properties. None of this is in version control.
+val keysProps = Properties().apply {
+    val f = rootProject.file("keys.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
+
+// Bundled TMDB API key, from the TMDB_API_KEY env var or keys.properties. Released APKs carry it so
+// posters work with no per-user signup; source builds without it fall back to the keyless
+// iTunes/TVmaze sources plus the in-app key override.
+val tmdbApiKey: String =
+    (System.getenv("TMDB_API_KEY") ?: keysProps.getProperty("TMDB_API_KEY") ?: "").trim()
+
+// Release signing is enabled only when the keystore is configured (so source builds still work,
+// producing an unsigned release APK).
+val releaseKeystore: String? = keysProps.getProperty("RELEASE_STORE_FILE")?.takeIf { it.isNotBlank() }
 
 if (tmdbApiKey.isBlank()) {
     logger.warn(
@@ -44,9 +50,23 @@ android {
         buildConfigField("String", "TMDB_API_KEY", "\"$tmdbApiKey\"")
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = rootProject.file(releaseKeystore)
+                storePassword = keysProps.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = keysProps.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = keysProps.getProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseKeystore != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

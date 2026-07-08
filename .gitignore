@@ -46,6 +46,8 @@ android/.kotlin/
 android/keys.properties
 *.apk
 *.aab
+*.keystore
+*.jks
 
 # Project specific
 Elmo.in.Grouchland.mkv
