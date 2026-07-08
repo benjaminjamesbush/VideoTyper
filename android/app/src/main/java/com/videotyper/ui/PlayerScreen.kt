@@ -12,10 +12,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
@@ -78,14 +79,19 @@ fun PlayerScreen(
     // Anti-mash cooldown: the whole screen (video included) drains to grayscale. The UI
     // stays fully visible — clearly alive, just colorless — with no sound, no message, and
     // nothing animating (the letter flash freezes and hints pause while gray).
+    //
+    // Layout is fixed so the keyboard never disturbs it: the video is pinned at the very top
+    // at full width and a fixed 16:9 height, the subtitle sits directly beneath it, and a
+    // flexible spacer pushes the transport controls to the bottom. The window does not resize
+    // for the IME (windowSoftInputMode=adjustNothing), so the keyboard simply overlays the
+    // lower controls during a typing round — the video and subtitle above it never move.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .imePadding()
             .grayscale(controller.isCoolingDown)
     ) {
-        VideoSurface(controller, Modifier.fillMaxWidth().weight(1f))
+        VideoSurface(controller, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         SubtitleStrip(controller)
         controller.statusMessage?.let {
             Text(
@@ -96,6 +102,7 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
             )
         }
+        Spacer(Modifier.weight(1f))
         SeekBar(controller)
         ControlsRow(controller, lastOpened, onOpened)
         HiddenTypingField(controller)
