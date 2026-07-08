@@ -8,7 +8,9 @@ https://github.com/user-attachments/assets/a00bf606-0342-4f8d-9b41-ad44c43a075d
 
 ## Install
 
-Download the latest **`VideoTyper-*.apk`** from the [**releases page**](https://github.com/benjaminjamesbush/VideoTyper/releases/latest), open it on your phone, and allow installing from unknown sources when prompted. Android 8.0+ (API 26), portrait phones. The build is signed, so later versions update cleanly over it.
+### ⬇ [Download the latest APK](https://github.com/benjaminjamesbush/VideoTyper/releases/latest/download/VideoTyper.apk)
+
+Open it on your phone and allow installing from unknown sources when prompted. Android 8.0+ (API 26), portrait phones. The build is signed, so later versions update cleanly over it. (Older versions and release notes: [all releases](https://github.com/benjaminjamesbush/VideoTyper/releases).)
 
 ## What videos work
 
