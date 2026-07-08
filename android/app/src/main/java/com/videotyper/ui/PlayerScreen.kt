@@ -5,8 +5,6 @@ import android.text.format.DateUtils
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,14 +24,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,8 +72,7 @@ private val FlashRed = Color(0xFFE53935)
 @Composable
 fun PlayerScreen(
     controller: GameController,
-    lastOpened: String?,
-    onOpened: (String) -> Unit,
+    onMenuClick: () -> Unit,
 ) {
     // The soft keyboard is a permanent fixture: typing is ~90% of the app, so it stays up for
     // the whole session rather than playing peek-a-boo per round. The layout reserves space for
@@ -90,8 +83,6 @@ fun PlayerScreen(
     //
     // Anti-mash cooldown: the whole UI (video included) drains to grayscale — still fully
     // visible, just colorless — with no sound, message, or animation while gray.
-    var networkDialogOpen by remember { mutableStateOf(false) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -112,13 +103,8 @@ fun PlayerScreen(
         }
         Spacer(Modifier.weight(1f))
         SeekBar(controller)
-        ControlsRow(controller, onOpened, onNetworkClick = { networkDialogOpen = true })
-        // Suppressed while the Network dialog owns focus for its URL field.
-        HiddenTypingField(controller, suppressKeyboard = networkDialogOpen)
-    }
-
-    if (networkDialogOpen) {
-        NetworkDialog(controller, lastOpened, onOpened, onDismiss = { networkDialogOpen = false })
+        ControlsRow(controller, onMenuClick)
+        HiddenTypingField(controller)
     }
 }
 
@@ -303,18 +289,8 @@ private fun formatTime(ms: Long): String = DateUtils.formatElapsedTime(ms / 1000
 @Composable
 private fun ControlsRow(
     controller: GameController,
-    onOpened: (String) -> Unit,
-    onNetworkClick: () -> Unit,
+    onMenuClick: () -> Unit,
 ) {
-    val filePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            onOpened(uri.toString())
-            controller.openUri(uri)
-        }
-    }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -323,17 +299,11 @@ private fun ControlsRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         OutlinedButton(
-            onClick = { filePicker.launch(arrayOf("video/*")) },
+            onClick = onMenuClick,
             enabled = !controller.isTyping,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             modifier = Modifier.weight(1f)
-        ) { Text("Open") }
-        OutlinedButton(
-            onClick = onNetworkClick,
-            enabled = !controller.isTyping,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            modifier = Modifier.weight(1f)
-        ) { Text("Network") }
+        ) { Text("Menu") }
         Button(
             onClick = { controller.playPause() },
             enabled = controller.hasMedia && !controller.isTyping,
@@ -349,56 +319,12 @@ private fun ControlsRow(
     }
 }
 
-@UnstableApi
-@Composable
-private fun NetworkDialog(
-    controller: GameController,
-    lastOpened: String?,
-    onOpened: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var url by remember {
-        mutableStateOf(lastOpened?.takeIf { it.startsWith("smb://") || it.startsWith("http") } ?: "smb://")
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Open network video") },
-        text = {
-            Column {
-                Text(
-                    "smb://user:pass@server/share/movie.mkv or an http(s) URL",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onDismiss()
-                val trimmed = url.trim()
-                if (trimmed.isNotEmpty() && trimmed != "smb://") {
-                    onOpened(trimmed)
-                    controller.openUri(android.net.Uri.parse(trimmed))
-                }
-            }) { Text("Play") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
 /**
  * Invisible 1dp text field that keeps the soft keyboard up for the whole session and captures the
  * child's key presses. Typing is the primary interaction, so the keyboard is a permanent fixture:
  * this field holds focus continuously and the IME is re-shown if the system ever dismisses it
- * (back gesture, focus blip). [suppressKeyboard] is set while the Network dialog needs focus for
- * its own URL field, so we don't fight it.
+ * (back gesture, focus blip). The menu is a separate screen that doesn't compose this field, so
+ * the keyboard is naturally absent there.
  *
  * Keystrokes are captured as a DELTA rather than by resetting the field to "" each change. A normal
  * Text field lets the keyboard keep a committed text state; the old reset-to-empty approach raced
@@ -415,7 +341,7 @@ private fun NetworkDialog(
 @OptIn(ExperimentalLayoutApi::class)
 @UnstableApi
 @Composable
-private fun HiddenTypingField(controller: GameController, suppressKeyboard: Boolean) {
+private fun HiddenTypingField(controller: GameController) {
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     var fieldText by remember { mutableStateOf("") }
@@ -448,18 +374,15 @@ private fun HiddenTypingField(controller: GameController, suppressKeyboard: Bool
         if (controller.isTyping) fieldText = ""
     }
 
-    // Keep the keyboard permanently visible: hold focus and re-show it whenever it becomes
-    // hidden — unless the Network dialog is up, in which case we leave focus to its URL field.
-    // Re-asserting focus on every ime-visibility change also reclaims it when the dialog closes
-    // (the keyboard may stay up while focus was elsewhere).
+    // Keep the keyboard permanently visible: hold focus and re-show it whenever it becomes hidden
+    // (back gesture, focus blip). Re-asserting focus on each ime-visibility change also reclaims it
+    // after returning from the menu screen.
     val imeVisible = WindowInsets.isImeVisible
-    LaunchedEffect(suppressKeyboard, imeVisible) {
-        if (!suppressKeyboard) {
-            focusRequester.requestFocus()
-            if (!imeVisible) {
-                delay(50)  // let focus land before asking for the IME
-                keyboard?.show()
-            }
+    LaunchedEffect(imeVisible) {
+        focusRequester.requestFocus()
+        if (!imeVisible) {
+            delay(50)  // let focus land before asking for the IME
+            keyboard?.show()
         }
     }
 }
