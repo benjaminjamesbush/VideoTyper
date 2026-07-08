@@ -1,7 +1,6 @@
 package com.videotyper.ui
 
 import android.graphics.ColorMatrixColorFilter
-import android.text.format.DateUtils
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -71,9 +70,9 @@ private val FlashRed = Color(0xFFE53935)
 
 // Vertical space kept for the subtitle strip + transport controls, so the video can never grow
 // large enough to push them off-screen (the failure mode on near-square foldable displays). Sized
-// to what that bottom UI actually needs (subtitle min ~110dp + seek/controls ~110dp), measured so
-// the cap does NOT bind on a normal phone — there a full-width 16:9 video keeps its full size.
-private val BottomUiReserve = 220.dp
+// to what that bottom UI actually needs (subtitle strip + scrub bar + controls), measured so the
+// cap does NOT bind on a normal phone — there a full-width 16:9 video keeps its full size.
+private val BottomUiReserve = 180.dp
 
 @UnstableApi
 @Composable
@@ -191,9 +190,9 @@ private fun SubtitleStrip(controller: GameController) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 110.dp)
+            .defaultMinSize(minHeight = 80.dp)
             .background(Color.Black)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 2.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -275,30 +274,22 @@ private fun SeekBar(controller: GameController) {
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Slider(
-            value = if (dragValue >= 0f) dragValue
-            else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
-            onValueChange = { if (!controller.isTyping) dragValue = it },
-            onValueChangeFinished = {
-                if (dragValue >= 0f && durationMs > 0 && !controller.isTyping) {
-                    controller.seekTo((dragValue * durationMs).toLong())
-                }
-                dragValue = -1f
-            },
-            enabled = controller.hasMedia && !controller.isTyping,
-        )
-        Text(
-            text = "${formatTime(positionMs)} / ${formatTime(durationMs)}",
-            color = Color.Gray,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    // Just the scrub bar — no runtime label (not useful here, and it cost vertical space). Height
+    // is trimmed from the Material default so the bar stays compact.
+    Slider(
+        value = if (dragValue >= 0f) dragValue
+        else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
+        onValueChange = { if (!controller.isTyping) dragValue = it },
+        onValueChangeFinished = {
+            if (dragValue >= 0f && durationMs > 0 && !controller.isTyping) {
+                controller.seekTo((dragValue * durationMs).toLong())
+            }
+            dragValue = -1f
+        },
+        enabled = controller.hasMedia && !controller.isTyping,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(28.dp)
+    )
 }
-
-private fun formatTime(ms: Long): String = DateUtils.formatElapsedTime(ms / 1000)
 
 @UnstableApi
 @Composable
@@ -306,10 +297,14 @@ private fun ControlsRow(
     controller: GameController,
     onMenuClick: () -> Unit,
 ) {
+    // A gap below the buttons so they don't crowd the keyboard. (Button height is Material's ~48dp
+    // minimum; it only looked short on the Fold when the over-budget layout compressed it, which
+    // the video-height cap now prevents.)
+    val buttonPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -317,18 +312,18 @@ private fun ControlsRow(
         // disabled during a typing round — there is deliberately no way to skip the word.
         OutlinedButton(
             onClick = onMenuClick,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            contentPadding = buttonPadding,
             modifier = Modifier.weight(1f)
         ) { Text("Menu") }
         Button(
             onClick = { controller.playPause() },
             enabled = !controller.isTyping,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            contentPadding = buttonPadding,
             modifier = Modifier.weight(1f)
         ) { Text(if (controller.isPlaying) "Pause" else "Play") }
         OutlinedButton(
             onClick = { controller.stop() },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            contentPadding = buttonPadding,
             modifier = Modifier.weight(1f)
         ) { Text("Stop") }
     }
