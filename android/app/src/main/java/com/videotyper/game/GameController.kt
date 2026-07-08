@@ -287,7 +287,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             // then fall back to the regular hint cadence.
             val current = round
             if (current != null && isTyping && typedCount < current.word.length) {
-                audio.speak("Type the letter ${current.word[typedCount].uppercaseChar()}")
+                audio.speak("Type ${spokenLetter(current.word[typedCount])}")
                 scheduleHint(REPEAT_HINT_DELAY_MS)
             }
         }
@@ -346,9 +346,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
                     delay(250)
                     continue
                 }
-                // "the letter X" — not "Type X" — so TTS doesn't read a Roman-numeral letter
-                // (I, V, X, ...) as a number ("Type I" would be spoken "type one").
-                audio.speak("Type the letter ${current.word[typedCount].uppercaseChar()}")
+                audio.speak("Type ${spokenLetter(current.word[typedCount])}")
                 delay(REPEAT_HINT_DELAY_MS)
             }
         }
@@ -357,6 +355,22 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private fun cancelHints() {
         hintJob?.cancel()
         hintJob = null
+    }
+
+    /**
+     * How a letter should be written for TTS in "Type X". Roman-numeral letters are spelled as
+     * homophones so the engine doesn't read them as numbers ("Type I" -> "type one"); every other
+     * letter is spoken fine as-is.
+     */
+    private fun spokenLetter(c: Char): String = when (c.uppercaseChar()) {
+        'I' -> "eye"
+        'V' -> "vee"
+        'X' -> "ex"
+        'L' -> "el"
+        'C' -> "see"
+        'D' -> "dee"
+        'M' -> "em"
+        else -> c.uppercaseChar().toString()
     }
 
     private fun wasRecentlyCompleted(text: String, positionMs: Long): Boolean =

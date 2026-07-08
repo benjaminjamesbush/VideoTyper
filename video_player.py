@@ -1298,9 +1298,11 @@ class VideoPlayer:
             return
         if self.current_position < len(self.target_word):
             next_letter = self.target_word[self.current_position]
-            # "the letter X" — not "Type X" — so TTS doesn't read a Roman-numeral letter
-            # (I, V, X, ...) as a number ("Type I" would be spoken "type one").
-            hint_text = f"Type the letter {next_letter}"
+            # Spell Roman-numeral letters as homophones so TTS doesn't read them as numbers
+            # ("Type I" would be spoken "type one"); other letters are fine as-is.
+            spoken = {'I': 'eye', 'V': 'vee', 'X': 'ex', 'L': 'el',
+                      'C': 'see', 'D': 'dee', 'M': 'em'}.get(next_letter.upper(), next_letter.upper())
+            hint_text = f"Type {spoken}"
             self.speak_word(hint_text)
             
             # Schedule the next hint in 5 seconds
