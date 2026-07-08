@@ -111,7 +111,12 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     }
 
     fun playPause() {
-        if (isTyping) return // desktop blocks play/pause during a typing round
+        if (isTyping) {
+            // Escape hatch during a typing round: abandon the word and resume the movie.
+            resetGameState()
+            player.play()
+            return
+        }
         if (player.isPlaying) player.pause() else player.play()
     }
 
@@ -119,6 +124,12 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         resetGameState()
         player.pause()
         player.seekTo(0)
+    }
+
+    /** Leave gameplay for the menu: end any typing round and pause. */
+    fun leaveGame() {
+        resetGameState()
+        player.pause()
     }
 
     /** User-initiated scrub. Blocked during typing rounds (the slider is disabled then too). */

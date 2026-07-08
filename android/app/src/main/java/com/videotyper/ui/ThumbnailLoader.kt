@@ -5,15 +5,18 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import com.videotyper.player.SmbMediaDataSource
+import com.videotyper.player.SmbSupport
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Generates and disk-caches a poster frame for a video URI. Works for local (content://, file://)
- * and http(s) sources via MediaMetadataRetriever; smb:// returns null (the recents ribbon shows a
- * placeholder for those, since decoding a frame over a network share is slow and fragile).
+ * Generates and disk-caches a poster frame for a video URI. Local (content://, file://) and
+ * http(s) sources decode directly through MediaMetadataRetriever; smb:// decodes over the share
+ * via a jcifs-backed MediaDataSource. The first decode of a network video is slow, but the result
+ * is cached to disk so the recents ribbon is instant thereafter.
  */
 object ThumbnailLoader {
 
@@ -33,10 +36,14 @@ object ThumbnailLoader {
 
     private fun extract(context: Context, uriString: String): Bitmap? {
         val scheme = Uri.parse(uriString).scheme?.lowercase()
-        if (scheme == "smb") return null
         val mmr = MediaMetadataRetriever()
+        var smbSource: SmbMediaDataSource? = null
         return try {
             when (scheme) {
+                "smb" -> {
+                    smbSource = SmbMediaDataSource(SmbSupport.smbFile(uriString))
+                    mmr.setDataSource(smbSource)
+                }
                 "http", "https" -> mmr.setDataSource(uriString, HashMap())
                 else -> mmr.setDataSource(context, Uri.parse(uriString))
             }
@@ -48,6 +55,10 @@ object ThumbnailLoader {
         } finally {
             try {
                 mmr.release()
+            } catch (_: Exception) {
+            }
+            try {
+                smbSource?.close()
             } catch (_: Exception) {
             }
         }

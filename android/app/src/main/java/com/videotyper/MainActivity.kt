@@ -23,10 +23,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
-import com.videotyper.data.RecentVideo
 import com.videotyper.data.RecentsStore
+import com.videotyper.data.SmbServer
+import com.videotyper.data.SmbServersStore
 import com.videotyper.game.GameController
 import com.videotyper.ui.MenuScreen
+import com.videotyper.ui.NetworkBrowserScreen
 import com.videotyper.ui.PlayerScreen
 
 @UnstableApi
@@ -43,39 +45,56 @@ class MainActivity : ComponentActivity() {
 
         val prefs = getSharedPreferences("videotyper", MODE_PRIVATE)
         val recentsStore = RecentsStore(this)
+        val serversStore = SmbServersStore(this)
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 // No media loaded yet? Start on the menu so there's always a way to pick a video.
                 var showMenu by remember { mutableStateOf(!controller.hasMedia) }
+                var browseServer by remember { mutableStateOf<SmbServer?>(null) }
                 var recents by remember { mutableStateOf(recentsStore.recents()) }
-                var lastOpened by remember { mutableStateOf(prefs.getString("last_uri", null)) }
+                var servers by remember { mutableStateOf(serversStore.servers()) }
 
                 val open: (String) -> Unit = { uriString ->
                     persistUriPermissionIfPossible(uriString)
-                    val name = resolveDisplayName(uriString)
-                    recentsStore.add(uriString, name)
+                    recentsStore.add(uriString, resolveDisplayName(uriString))
                     recents = recentsStore.recents()
                     prefs.edit().putString("last_uri", uriString).apply()
-                    lastOpened = uriString
                     controller.openUri(uriString.toUri())
+                    browseServer = null
                     showMenu = false
                 }
 
                 Surface(Modifier.fillMaxSize(), color = Color.Black) {
                     Box(Modifier.systemBarsPadding()) {
-                        if (showMenu) {
-                            MenuScreen(
-                                recents = recents,
-                                lastNetworkUrl = lastOpened,
+                        val server = browseServer
+                        when {
+                            server != null -> NetworkBrowserScreen(
+                                server = server,
                                 onPlay = open,
+                                onBack = { browseServer = null },
+                            )
+
+                            showMenu -> MenuScreen(
+                                recents = recents,
+                                servers = servers,
+                                onPlay = open,
+                                onBrowseServer = { browseServer = it },
+                                onAddServer = {
+                                    serversStore.save(it)
+                                    servers = serversStore.servers()
+                                },
+                                onDeleteServer = {
+                                    serversStore.delete(it.id)
+                                    servers = serversStore.servers()
+                                },
                                 onBack = { showMenu = false },
                             )
-                        } else {
-                            PlayerScreen(
+
+                            else -> PlayerScreen(
                                 controller = controller,
                                 onMenuClick = {
-                                    controller.player.pause()
+                                    controller.leaveGame()
                                     showMenu = true
                                 },
                             )

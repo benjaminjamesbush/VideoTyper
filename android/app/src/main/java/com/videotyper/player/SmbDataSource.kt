@@ -6,12 +6,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSpec
 import java.io.IOException
-import java.net.URLDecoder
-import java.util.Properties
-import jcifs.CIFSContext
-import jcifs.config.PropertyConfiguration
-import jcifs.context.BaseContext
-import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import kotlin.math.min
@@ -35,8 +29,7 @@ class SmbDataSource : BaseDataSource(/* isNetwork = */ true) {
         dataSpecUri = dataSpec.uri
         transferInitializing(dataSpec)
         try {
-            val ctx = contextFor(dataSpec.uri)
-            val smbFile = SmbFile(dataSpec.uri.toString(), ctx)
+            val smbFile = SmbSupport.smbFile(dataSpec.uri.toString())
             file = smbFile
             val length = smbFile.length()
             val access = SmbRandomAccessFile(smbFile, "r")
@@ -92,20 +85,4 @@ class SmbDataSource : BaseDataSource(/* isNetwork = */ true) {
         }
     }
 
-    private fun contextFor(uri: Uri): CIFSContext {
-        val props = Properties().apply {
-            setProperty("jcifs.smb.client.minVersion", "SMB202")
-            setProperty("jcifs.smb.client.maxVersion", "SMB311")
-        }
-        val base = BaseContext(PropertyConfiguration(props))
-        val userInfo = uri.userInfo ?: return base.withGuestCrendentials()
-
-        // userInfo forms: "user", "user:pass", "domain;user:pass"
-        val decoded = URLDecoder.decode(userInfo, "UTF-8")
-        val domain = decoded.substringBefore(';', "")
-        val rest = decoded.substringAfter(';')
-        val user = rest.substringBefore(':')
-        val pass = rest.substringAfter(':', "")
-        return base.withCredentials(NtlmPasswordAuthenticator(domain, user, pass))
-    }
 }
