@@ -1,0 +1,7 @@
+# Python dependencies for the desktop version (video_player.py).
+# Also requires VLC media player and ffmpeg installed on the system and on PATH.
+python-vlc
+pyttsx3
+pygame
+numpy
+Pillow
