@@ -11,12 +11,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
@@ -76,19 +81,22 @@ fun PlayerScreen(
     lastOpened: String?,
     onOpened: (String) -> Unit,
 ) {
-    // Anti-mash cooldown: the whole screen (video included) drains to grayscale. The UI
-    // stays fully visible — clearly alive, just colorless — with no sound, no message, and
-    // nothing animating (the letter flash freezes and hints pause while gray).
+    // The soft keyboard is a permanent fixture: typing is ~90% of the app, so it stays up for
+    // the whole session rather than playing peek-a-boo per round. The layout reserves space for
+    // it with imePadding, so everything lives in the band above the keyboard: the video pinned
+    // at the very top at full width and a fixed 16:9 height, the subtitle directly beneath it,
+    // and a flexible spacer pushing the compact transport controls down to just above the keys.
+    // Because the keyboard never hides, that band is a constant size and nothing ever reflows.
     //
-    // Layout is fixed so the keyboard never disturbs it: the video is pinned at the very top
-    // at full width and a fixed 16:9 height, the subtitle sits directly beneath it, and a
-    // flexible spacer pushes the transport controls to the bottom. The window does not resize
-    // for the IME (windowSoftInputMode=adjustNothing), so the keyboard simply overlays the
-    // lower controls during a typing round — the video and subtitle above it never move.
+    // Anti-mash cooldown: the whole UI (video included) drains to grayscale — still fully
+    // visible, just colorless — with no sound, message, or animation while gray.
+    var networkDialogOpen by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .imePadding()
             .grayscale(controller.isCoolingDown)
     ) {
         VideoSurface(controller, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
@@ -104,8 +112,13 @@ fun PlayerScreen(
         }
         Spacer(Modifier.weight(1f))
         SeekBar(controller)
-        ControlsRow(controller, lastOpened, onOpened)
-        HiddenTypingField(controller)
+        ControlsRow(controller, onOpened, onNetworkClick = { networkDialogOpen = true })
+        // Suppressed while the Network dialog owns focus for its URL field.
+        HiddenTypingField(controller, suppressKeyboard = networkDialogOpen)
+    }
+
+    if (networkDialogOpen) {
+        NetworkDialog(controller, lastOpened, onOpened, onDismiss = { networkDialogOpen = false })
     }
 }
 
@@ -290,11 +303,9 @@ private fun formatTime(ms: Long): String = DateUtils.formatElapsedTime(ms / 1000
 @Composable
 private fun ControlsRow(
     controller: GameController,
-    lastOpened: String?,
     onOpened: (String) -> Unit,
+    onNetworkClick: () -> Unit,
 ) {
-    var showUrlDialog by remember { mutableStateOf(false) }
-
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -307,93 +318,104 @@ private fun ControlsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         OutlinedButton(
             onClick = { filePicker.launch(arrayOf("video/*")) },
             enabled = !controller.isTyping,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             modifier = Modifier.weight(1f)
         ) { Text("Open") }
         OutlinedButton(
-            onClick = { showUrlDialog = true },
+            onClick = onNetworkClick,
             enabled = !controller.isTyping,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             modifier = Modifier.weight(1f)
         ) { Text("Network") }
         Button(
             onClick = { controller.playPause() },
             enabled = controller.hasMedia && !controller.isTyping,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             modifier = Modifier.weight(1f)
         ) { Text(if (controller.isPlaying) "Pause" else "Play") }
         OutlinedButton(
             onClick = { controller.stop() },
             enabled = controller.hasMedia && !controller.isTyping,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             modifier = Modifier.weight(1f)
         ) { Text("Stop") }
     }
+}
 
-    if (showUrlDialog) {
-        var url by remember {
-            mutableStateOf(lastOpened?.takeIf { it.startsWith("smb://") || it.startsWith("http") } ?: "smb://")
-        }
-        AlertDialog(
-            onDismissRequest = { showUrlDialog = false },
-            title = { Text("Open network video") },
-            text = {
-                Column {
-                    Text(
-                        "smb://user:pass@server/share/movie.mkv or an http(s) URL",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    OutlinedTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showUrlDialog = false
-                    val trimmed = url.trim()
-                    if (trimmed.isNotEmpty() && trimmed != "smb://") {
-                        onOpened(trimmed)
-                        controller.openUri(android.net.Uri.parse(trimmed))
-                    }
-                }) { Text("Play") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showUrlDialog = false }) { Text("Cancel") }
-            }
-        )
+@UnstableApi
+@Composable
+private fun NetworkDialog(
+    controller: GameController,
+    lastOpened: String?,
+    onOpened: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var url by remember {
+        mutableStateOf(lastOpened?.takeIf { it.startsWith("smb://") || it.startsWith("http") } ?: "smb://")
     }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open network video") },
+        text = {
+            Column {
+                Text(
+                    "smb://user:pass@server/share/movie.mkv or an http(s) URL",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                val trimmed = url.trim()
+                if (trimmed.isNotEmpty() && trimmed != "smb://") {
+                    onOpened(trimmed)
+                    controller.openUri(android.net.Uri.parse(trimmed))
+                }
+            }) { Text("Play") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 /**
- * Invisible 1dp text field that summons the keyboard during typing rounds. Its text is cleared
- * after every change, so each change carries just the newly typed characters, fed to the game
- * (wrong letters get ignored there).
+ * Invisible 1dp text field that keeps the soft keyboard up for the whole session and captures the
+ * child's key presses. Typing is the primary interaction, so the keyboard is a permanent fixture:
+ * this field holds focus continuously and the IME is re-shown if the system ever dismisses it
+ * (back gesture, focus blip). [suppressKeyboard] is set while the Network dialog needs focus for
+ * its own URL field, so we don't fight it.
  *
- * Uses a Password keyboard type deliberately. A normal Text field lets the keyboard keep a
- * committed text state. The old approach reset the field to "" after every keystroke and treated
- * each onValueChange as only-new characters. Under fast mashing that reset races the IME: the
- * keyboard's InputConnection still believes the field holds the previous letters, so it sends
- * cumulative multi-character values ("EL", "ELM", ...) which the game reads as gesture-typing and
- * turns into an endlessly re-triggering cooldown (the "stuck after gray" bug) — and the phantom
- * values keep arriving after the child stops, which is why it only clears after a long wait.
- *
- * Fix: never reset mid-round. Let the field accumulate the round's keystrokes and feed only the
- * DELTA (the characters appended since the last change) to the game. Because we always store back
- * exactly what the IME sent, the two never disagree, so no phantom cumulative input can form. The
- * buffer is cleared only at the start of each round, when no input is in flight. Password keyboard
- * type additionally disables composing/suggestions/swipe so deltas are clean committed characters
- * and swipe-to-type can't cheat the whole word in one go.
+ * Keystrokes are captured as a DELTA rather than by resetting the field to "" each change. A normal
+ * Text field lets the keyboard keep a committed text state; the old reset-to-empty approach raced
+ * that state under fast mashing — the IME, still believing the field held the previous letters,
+ * sent cumulative multi-character values ("EL", "ELM", ...) which the game read as gesture-typing
+ * and turned into an endlessly re-triggering cooldown (the "stuck after gray" bug), with phantom
+ * values arriving even after the child stopped. Instead the field accumulates the round's
+ * keystrokes and the game is fed only the characters appended since the last change (the suffix
+ * past the common prefix). Because we always store back exactly what the IME sent, the two never
+ * disagree, so no phantom input can form. The buffer is cleared only at round start, when no input
+ * is in flight. Password keyboard type additionally disables composing/suggestions/swipe, so
+ * deltas are clean committed characters and swipe-to-type can't cheat the whole word in one go.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @UnstableApi
 @Composable
-private fun HiddenTypingField(controller: GameController) {
+private fun HiddenTypingField(controller: GameController, suppressKeyboard: Boolean) {
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     var fieldText by remember { mutableStateOf("") }
@@ -421,15 +443,23 @@ private fun HiddenTypingField(controller: GameController) {
             .focusRequester(focusRequester)
     )
 
+    // Fresh input buffer at the start of each typing round (no input in flight then).
     LaunchedEffect(controller.isTyping) {
-        if (controller.isTyping) {
-            fieldText = ""  // clean slate per round, while no input is in flight
+        if (controller.isTyping) fieldText = ""
+    }
+
+    // Keep the keyboard permanently visible: hold focus and re-show it whenever it becomes
+    // hidden — unless the Network dialog is up, in which case we leave focus to its URL field.
+    // Re-asserting focus on every ime-visibility change also reclaims it when the dialog closes
+    // (the keyboard may stay up while focus was elsewhere).
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(suppressKeyboard, imeVisible) {
+        if (!suppressKeyboard) {
             focusRequester.requestFocus()
-            // Give focus a beat to land before asking for the IME.
-            delay(50)
-            keyboard?.show()
-        } else {
-            keyboard?.hide()
+            if (!imeVisible) {
+                delay(50)  // let focus land before asking for the IME
+                keyboard?.show()
+            }
         }
     }
 }
