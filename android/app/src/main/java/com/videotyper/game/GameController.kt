@@ -43,6 +43,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val FIRST_HINT_DELAY_MS = 2_000L   // desktop: hint 2 s after pause/keystroke
         private const val REPEAT_HINT_DELAY_MS = 5_000L  // then every 5 s while stuck
         private const val REWARD_PAUSE_MS = 1_200L       // let the reward jingle play out
+        private const val RESUME_REWIND_MS = 500L        // small run-up before the resume point to smooth the start/stop
         private const val REPLAY_MATCH_WINDOW_MS = 3_000L
         private const val COMPLETED_CUE_MEMORY = 100
 
@@ -85,8 +86,8 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     // ---- engine state ----
     private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
-    private data class Round(val text: String, val word: String, val cueStartMs: Long)
-    private data class CompletedCue(val text: String, val startMs: Long)
+    private data class Round(val text: String, val word: String, val cueStartMs: Long, val cueEndMs: Long)
+    private data class CompletedCue(val text: String, val startMs: Long, val endMs: Long)
 
     private var activeCue: ActiveCue? = null
     private var round: Round? = null
@@ -251,7 +252,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private fun startRound(cue: ActiveCue, endMs: Long) {
         val word = cue.word ?: return
         player.pause()
-        round = Round(cue.text, word, cue.startMs)
+        round = Round(cue.text, word, cue.startMs, endMs)
         activeCue = null
 
         // Show the frame from the middle of the line while the child types.
@@ -340,16 +341,21 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private fun completeRound(current: Round) {
         cancelHints()
         isTyping = false
-        rememberCompleted(current.text, current.cueStartMs)
+        rememberCompleted(current.text, current.cueStartMs, current.cueEndMs)
         audio.playReward()
 
         resumeJob = scope.launch {
             delay(REWARD_PAUSE_MS)
             round = null
             clearSubtitleDisplay()
-            // Replay the whole line as a reward, then playback simply continues.
+            // Resume with a tiny run-up before the line's end (just to smooth the pause→play seam)
+            // rather than replaying the whole line, which made movie progress sleepy. Clamp so a
+            // line shorter than the rewind (shouldn't happen) can't seek before its start or negative.
             gameSeekInProgress = true
-            player.seekTo(current.cueStartMs)
+            val resumeAt = (current.cueEndMs - RESUME_REWIND_MS)
+                .coerceAtLeast(current.cueStartMs)
+                .coerceAtLeast(0L)
+            player.seekTo(resumeAt)
             player.play()
         }
     }
@@ -395,11 +401,13 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     private fun wasRecentlyCompleted(text: String, positionMs: Long): Boolean =
         completedCues.any {
-            it.text == text && kotlin.math.abs(it.startMs - positionMs) < REPLAY_MATCH_WINDOW_MS
+            it.text == text &&
+                positionMs > it.startMs - REPLAY_MATCH_WINDOW_MS &&
+                positionMs < it.endMs + REPLAY_MATCH_WINDOW_MS
         }
 
-    private fun rememberCompleted(text: String, startMs: Long) {
-        completedCues.addLast(CompletedCue(text, startMs))
+    private fun rememberCompleted(text: String, startMs: Long, endMs: Long) {
+        completedCues.addLast(CompletedCue(text, startMs, endMs))
         while (completedCues.size > COMPLETED_CUE_MEMORY) completedCues.removeFirst()
     }
 
