@@ -158,9 +158,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        controller.onEnterForeground()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Screen off or left the app: silence the game's spoken prompts / hint loop immediately,
+        // even mid typing round (the movie is paused in onStop). Resumed in onResume.
+        controller.onEnterBackground()
+    }
+
     override fun onStop() {
         super.onStop()
-        // Pause rather than keep the movie (and TTS hints) running invisibly.
+        // Pause rather than keep the movie running invisibly.
         if (!controller.isTyping) controller.player.pause()
     }
 

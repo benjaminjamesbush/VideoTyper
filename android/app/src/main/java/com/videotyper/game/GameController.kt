@@ -97,6 +97,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var cooldownJob: Job? = null
     private var cooldownLenMs = 0L
     private var wrongStreak = 0
+    private var suspended = false // app not in the foreground (screen off / navigated away)
 
     // ---------------------------------------------------------------- media control
 
@@ -125,6 +126,28 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     fun leaveGame() {
         resetGameState()
         player.pause()
+    }
+
+    /**
+     * App went to the background (screen off, home, another app). Silence the game immediately —
+     * cut any TTS mid-utterance and stop the hint loop — so "type X" prompts don't keep talking
+     * out of sight. The round itself is preserved; [onEnterForeground] resumes it. The movie is
+     * paused by MainActivity.onStop.
+     */
+    fun onEnterBackground() {
+        suspended = true
+        cancelHints()
+        audio.stopSpeaking()
+    }
+
+    /** App returned to the foreground: resume the hint cadence if a typing round is still open. */
+    fun onEnterForeground() {
+        if (!suspended) return
+        suspended = false
+        val current = round
+        if (isTyping && current != null && !isCoolingDown && typedCount < current.word.length) {
+            scheduleHint(FIRST_HINT_DELAY_MS)
+        }
     }
 
     /**
@@ -299,7 +322,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             // Herald the return of interactivity with an immediate vocal prompt,
             // then fall back to the regular hint cadence.
             val current = round
-            if (current != null && isTyping && typedCount < current.word.length) {
+            if (current != null && isTyping && !suspended && typedCount < current.word.length) {
                 audio.speakLetterHint(current.word[typedCount])
                 scheduleHint(REPEAT_HINT_DELAY_MS)
             }
@@ -352,7 +375,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             delay(initialDelayMs)
             while (true) {
                 val current = round ?: break
-                if (!isTyping || typedCount >= current.word.length) break
+                if (!isTyping || suspended || typedCount >= current.word.length) break
                 // Vocal prompts are suspended while the anti-mash grayscale is active —
                 // a voice reacting to mashing would itself become the reward.
                 if (isCoolingDown) {
