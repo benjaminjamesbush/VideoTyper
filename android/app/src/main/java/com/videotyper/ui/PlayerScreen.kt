@@ -9,21 +9,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -33,28 +26,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,10 +55,9 @@ import kotlinx.coroutines.delay
 private val HighlightYellow = Color(0xFFFFEB3B)
 private val FlashRed = Color(0xFFE53935)
 
-// Vertical space kept for the subtitle strip + transport controls, so the video can never grow
-// large enough to push them off-screen (the failure mode on near-square foldable displays). Sized
-// to what that bottom UI actually needs (subtitle strip + scrub bar + controls), measured so the
-// cap does NOT bind on a normal phone — there a full-width 16:9 video keeps its full size.
+// Vertical space kept for the subtitle strip + scrub bar + controls (everything between the video
+// and the keyboard), so the video can never grow large enough to push them off-screen on near-square
+// foldable displays. The keyboard's own height is reserved separately (it scales with width).
 private val BottomUiReserve = 180.dp
 
 @UnstableApi
@@ -80,27 +66,25 @@ fun PlayerScreen(
     controller: GameController,
     onMenuClick: () -> Unit,
 ) {
-    // The soft keyboard is a permanent fixture: typing is ~90% of the app, so it stays up for
-    // the whole session rather than playing peek-a-boo per round. imePadding reserves space for
-    // it, so everything lives in the band above the keyboard.
+    // Layout, top to bottom: video (full width, 16:9, but capped), subtitle strip, scrub bar,
+    // controls, then the app's own on-screen keyboard pinned at the very bottom. The keyboard is a
+    // permanent fixture (typing is ~90% of the app) with a fixed height that scales with width, so
+    // nothing reflows when a typing round starts.
     //
-    // The video is pinned at the top, full width, at a 16:9 height — but capped so the subtitle
-    // and controls are always reserved space first (BottomUiReserve). On a tall phone the cap
-    // never binds (16:9 fits easily); on a near-square foldable a full-width 16:9 video would
-    // otherwise eat the whole height, so it's shortened (letterboxed) instead of hiding the
-    // controls. Because the keyboard never hides, this band is a constant size and nothing
-    // reflows during play.
+    // The video height is capped so the bottom UI + keyboard always get their space first: on a tall
+    // phone a full-width 16:9 video fits with room to spare; on a near-square foldable it's shortened
+    // (letterboxed) rather than hiding the controls.
     //
-    // Anti-mash cooldown: the whole UI (video included) drains to grayscale — still fully
+    // Anti-mash cooldown: the whole UI (video + keyboard included) drains to grayscale — still fully
     // visible, just colorless — with no sound, message, or animation while gray.
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .imePadding()
             .grayscale(controller.isCoolingDown)
     ) {
-        val videoHeight = minOf(maxWidth * 9f / 16f, maxHeight - BottomUiReserve)
+        val keyboardHeight = maxWidth * KEYBOARD_HEIGHT_FRACTION
+        val videoHeight = minOf(maxWidth * 9f / 16f, maxHeight - BottomUiReserve - keyboardHeight)
             .coerceAtLeast(120.dp)
         Column(Modifier.fillMaxSize()) {
             VideoSurface(controller, Modifier.fillMaxWidth().height(videoHeight))
@@ -117,7 +101,7 @@ fun PlayerScreen(
             Spacer(Modifier.weight(1f))
             SeekBar(controller)
             ControlsRow(controller, onMenuClick)
-            HiddenTypingField(controller)
+            CustomKeyboard(controller, Modifier.fillMaxWidth().height(keyboardHeight))
         }
     }
 }
@@ -326,73 +310,5 @@ private fun ControlsRow(
             contentPadding = buttonPadding,
             modifier = Modifier.weight(1f)
         ) { Text("Stop") }
-    }
-}
-
-/**
- * Invisible 1dp text field that keeps the soft keyboard up for the whole session and captures the
- * child's key presses. Typing is the primary interaction, so the keyboard is a permanent fixture:
- * this field holds focus continuously and the IME is re-shown if the system ever dismisses it
- * (back gesture, focus blip). The menu is a separate screen that doesn't compose this field, so
- * the keyboard is naturally absent there.
- *
- * Keystrokes are captured as a DELTA rather than by resetting the field to "" each change. A normal
- * Text field lets the keyboard keep a committed text state; the old reset-to-empty approach raced
- * that state under fast mashing — the IME, still believing the field held the previous letters,
- * sent cumulative multi-character values ("EL", "ELM", ...) which the game read as gesture-typing
- * and turned into an endlessly re-triggering cooldown (the "stuck after gray" bug), with phantom
- * values arriving even after the child stopped. Instead the field accumulates the round's
- * keystrokes and the game is fed only the characters appended since the last change (the suffix
- * past the common prefix). Because we always store back exactly what the IME sent, the two never
- * disagree, so no phantom input can form. The buffer is cleared only at round start, when no input
- * is in flight. Password keyboard type additionally disables composing/suggestions/swipe, so
- * deltas are clean committed characters and swipe-to-type can't cheat the whole word in one go.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@UnstableApi
-@Composable
-private fun HiddenTypingField(controller: GameController) {
-    val focusRequester = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
-    var fieldText by remember { mutableStateOf("") }
-
-    BasicTextField(
-        value = fieldText,
-        onValueChange = { newValue ->
-            // Feed only the characters appended since last time (suffix past the common prefix),
-            // so the game sees each newly typed letter exactly once and the field stays in sync
-            // with the IME instead of being force-reset out from under it.
-            var i = 0
-            val old = fieldText
-            while (i < old.length && i < newValue.length && old[i] == newValue[i]) i++
-            val added = newValue.substring(i)
-            if (added.isNotEmpty()) controller.onTyped(added)
-            fieldText = newValue
-        },
-        keyboardOptions = KeyboardOptions(
-            autoCorrectEnabled = false,
-            keyboardType = KeyboardType.Password,
-        ),
-        modifier = Modifier
-            .size(1.dp)
-            .alpha(0f)
-            .focusRequester(focusRequester)
-    )
-
-    // Fresh input buffer at the start of each typing round (no input in flight then).
-    LaunchedEffect(controller.isTyping) {
-        if (controller.isTyping) fieldText = ""
-    }
-
-    // Keep the keyboard permanently visible: hold focus and re-show it whenever it becomes hidden
-    // (back gesture, focus blip). Re-asserting focus on each ime-visibility change also reclaims it
-    // after returning from the menu screen.
-    val imeVisible = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisible) {
-        focusRequester.requestFocus()
-        if (!imeVisible) {
-            delay(50)  // let focus land before asking for the IME
-            keyboard?.show()
-        }
     }
 }
