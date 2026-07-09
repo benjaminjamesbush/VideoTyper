@@ -69,7 +69,7 @@ or open the `android/` folder in Android Studio.
 Under `android/app/src/main/java/com/videotyper/`:
 
 - `game/GameController.kt` — the game state machine, driven by ExoPlayer's live subtitle cue callbacks.
-- `game/WordSelector.kt` — word-picking rules (skip `(SOUNDS)`, speaker labels, contraction fragments; prefer 3+ letter words).
+- `game/WordSelector.kt` — word-picking rules (sound cues like `(LAUGHS)` and speaker names are eligible; skip contraction fragments; prefer 3+ letter words).
 - `game/AudioFeedback.kt` — letter WAVs (SoundPool), text-to-speech (word + hints), generated reward beeps (AudioTrack).
 - `ui/PlayerScreen.kt` — the play UI: video surface, subtitle strip with flashing next-letter, transport controls, and the always-on hidden text field that keeps the keyboard up.
 - `ui/MenuScreen.kt` (video chooser), `ui/NetworkBrowserScreen.kt` (SMB folder browser), `ui/ThumbnailManagerScreen.kt` (poster picker), `ui/SettingsScreen.kt` (TMDB key).
