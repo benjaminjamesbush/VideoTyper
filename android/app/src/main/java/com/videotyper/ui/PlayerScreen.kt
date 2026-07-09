@@ -259,18 +259,19 @@ private fun SeekBar(controller: GameController) {
     }
 
     // Just the scrub bar — no runtime label (not useful here, and it cost vertical space). Height
-    // is trimmed from the Material default so the bar stays compact.
+    // is trimmed from the Material default so the bar stays compact. Scrubbing is allowed at any
+    // time, including during a typing round (which it abandons — see GameController.seekTo).
     Slider(
         value = if (dragValue >= 0f) dragValue
         else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
-        onValueChange = { if (!controller.isTyping) dragValue = it },
+        onValueChange = { dragValue = it },
         onValueChangeFinished = {
-            if (dragValue >= 0f && durationMs > 0 && !controller.isTyping) {
+            if (dragValue >= 0f && durationMs > 0) {
                 controller.seekTo((dragValue * durationMs).toLong())
             }
             dragValue = -1f
         },
-        enabled = controller.hasMedia && !controller.isTyping,
+        enabled = controller.hasMedia,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(28.dp)
     )
 }

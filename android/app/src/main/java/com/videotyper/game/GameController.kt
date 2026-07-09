@@ -127,12 +127,22 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         player.pause()
     }
 
-    /** User-initiated scrub. Blocked during typing rounds (the slider is disabled then too). */
+    /**
+     * User-initiated scrub, allowed at any time — including mid typing round. Scrubbing away from a
+     * word abandons that round (ending the typing state and cutting off its speech) and resumes
+     * playback from the new position, so the movie plays on from wherever the child lands.
+     */
     fun seekTo(positionMs: Long) {
-        if (isTyping) return
-        activeCue = null
-        clearSubtitleDisplay()
+        val wasTyping = isTyping
+        if (wasTyping) {
+            resetGameState()      // end the round: cancel hints/cooldown/replay, clear the frozen line
+            audio.stopSpeaking()
+        } else {
+            activeCue = null
+            clearSubtitleDisplay()
+        }
         player.seekTo(positionMs)
+        if (wasTyping) player.play()  // the round had force-paused the movie; carry on playing
     }
 
     fun release() {
