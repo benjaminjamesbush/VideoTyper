@@ -5,31 +5,33 @@ import kotlin.random.Random
 /**
  * Picks the word the child will type from a subtitle line.
  *
- * Eligible: ordinary dialogue, **sound cues** ("(LAUGHS)"), and **speaker names** ("ELMO:").
- * Skipped: contraction / possessive fragments — because the regex is letters-only, "couldn't"
- * splits into "couldn" + "t", and we don't teach the apostrophe key, so any run touching a "'" is
- * dropped. Words of 1-2 letters are avoided (preferred, not hard-excluded — see the fallback).
+ * A "word" is a whole run of letters, *including* any word-internal apostrophe / hyphen and any
+ * accented letters — so "couldn't", "well-known" and "café" are each captured as ONE token and are
+ * never chopped into fragments. Punctuation and whitespace *around* a word are delimiters, so a
+ * sound cue "(LAUGHS)" and a speaker label "ELMO:" still yield the words "LAUGHS" / "ELMO".
+ *
+ * A word is eligible only if it is ENTIRELY plain A-Z letters (all the child can type). So any word
+ * containing an apostrophe, hyphen, accent, digit, etc. is dropped as a whole rather than split into
+ * a fragment. Sound cues and speaker names are eligible; 1-2 letter words are avoided (preferred,
+ * not hard-excluded — see the fallback).
  */
 object WordSelector {
-    private val WORD_REGEX = Regex("[a-zA-Z]+")
+    // A whole word: letters, keeping internal ' ' - between letters together (so we never split).
+    private val WORD_TOKEN = Regex("\\p{L}+(?:['’-]\\p{L}+)*")
+    // Eligible only if the entire word is plain ASCII letters.
+    private val ALL_ASCII = Regex("[a-zA-Z]+")
 
-    /** True if the line contains any letters at all (i.e. something to type). */
-    fun hasTypeableWords(text: String): Boolean = WORD_REGEX.containsMatchIn(text)
+    private fun eligibleWords(text: String): List<String> =
+        WORD_TOKEN.findAll(text).map { it.value }.filter { it.matches(ALL_ASCII) }.toList()
+
+    /** True if the line has at least one all-letters word to type. */
+    fun hasTypeableWords(text: String): Boolean =
+        WORD_TOKEN.findAll(text).any { it.value.matches(ALL_ASCII) }
 
     fun selectWord(text: String, random: Random = Random.Default): String? {
-        val matches = WORD_REGEX.findAll(text).toList()
-        if (matches.isEmpty()) return null
-
-        // Words touching an apostrophe are contraction/possessive fragments ("couldn't" -> "couldn",
-        // "t"; "Elmo's" -> "Elmo", "s"). Skip them since we don't teach the apostrophe key.
-        val noContractions = matches.filterNot { m ->
-            val before = text.getOrNull(m.range.first - 1)
-            val after = text.getOrNull(m.range.last + 1)
-            before == '\'' || after == '\'' || before == '’' || after == '’'
-        }
-        val longerWords = noContractions.filter { it.value.length > 2 }
-
-        val pool = longerWords.ifEmpty { noContractions }.ifEmpty { matches }
-        return pool.random(random).value
+        val words = eligibleWords(text)
+        if (words.isEmpty()) return null
+        val longer = words.filter { it.length > 2 }
+        return longer.ifEmpty { words }.random(random)
     }
 }
