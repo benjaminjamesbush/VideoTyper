@@ -5,9 +5,9 @@ import kotlin.random.Random
 /**
  * Picks the word the child will type from a subtitle line.
  *
- * A "word" is a whole run of letters, *including* any word-internal apostrophe / hyphen and any
- * accented letters — so "couldn't", "well-known" and "café" are each captured as ONE token and are
- * never chopped into fragments. Punctuation and whitespace *around* a word are delimiters, so a
+ * A "word" is a whole run of letters, *including* any word-internal apostrophe / hyphen / digit and
+ * any accented letters — so "couldn't", "well-known", "H2O" and "café" are each captured as ONE
+ * token and are never chopped into fragments. Punctuation and whitespace *around* a word are delimiters, so a
  * sound cue "(LAUGHS)" and a speaker label "ELMO:" still yield the words "LAUGHS" / "ELMO".
  *
  * A word is eligible only if it is ENTIRELY plain A-Z letters (all the child can type). So any word
@@ -16,9 +16,12 @@ import kotlin.random.Random
  * not hard-excluded — see the fallback).
  */
 object WordSelector {
-    // A whole word: letters, keeping internal ' ' - between letters together (so we never split).
-    private val WORD_TOKEN = Regex("\\p{L}+(?:['’-]\\p{L}+)*")
-    // Eligible only if the entire word is plain ASCII letters.
+    // A whole word: any run of letters / digits / apostrophes / hyphens, kept together so it's never
+    // split. Only surrounding whitespace and punctuation (parens, colon, comma, quotes…) delimit
+    // words, so "(LAUGHS)" and "ELMO:" still yield "LAUGHS" / "ELMO".
+    private val WORD_TOKEN = Regex("[\\p{L}\\p{Nd}'’-]+")
+    // Eligible only if the entire word is plain ASCII letters — anything with a digit / accent /
+    // apostrophe / hyphen fails this and is dropped as a whole rather than reduced to a fragment.
     private val ALL_ASCII = Regex("[a-zA-Z]+")
 
     private fun eligibleWords(text: String): List<String> =
