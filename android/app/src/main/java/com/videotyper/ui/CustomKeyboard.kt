@@ -1,8 +1,8 @@
 package com.videotyper.ui
 
+import android.os.Build
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
+import android.view.View
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -15,27 +15,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import com.videotyper.game.GameController
-import kotlinx.coroutines.launch
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
 
 /**
  * Fraction of the keyboard's WIDTH taken up by its height. Every dimension below is a fraction of
@@ -101,9 +105,69 @@ private val LandmarkBg = Color(0xFF2A2E35)
 private val LandmarkText = Color(0xFFAAB0B8)
 private val LitBg = Color(0xFFFFEB3B)
 private val LitText = Color(0xFF141414)
-private val GlowColor = Color(0xFFFFFFFF)
 
-private data class Glow(val cx: Float, val cy: Float, val keyWpx: Float)
+// ---- cosmic explosion (fires only on an accepted correct letter) ----
+private const val BOOM_DURATION_NS = 750_000_000L
+private val CosmicPalette = listOf(
+    Color(0xFF7C4DFF), Color(0xFF448AFF), Color(0xFF18FFFF),
+    Color(0xFFE040FB), Color(0xFFFF4081), Color(0xFFFFD740), Color(0xFFFFFFFF),
+)
+private class Particle(val angle: Float, val speed: Float, val size: Float, val color: Color, val streak: Boolean)
+private class Boom(val cx: Float, val cy: Float, val baseR: Float, val startNanos: Long, val particles: List<Particle>)
+
+private fun makeBoom(cx: Float, cy: Float, baseR: Float): Boom {
+    val n = 30
+    val ps = ArrayList<Particle>(n)
+    val twoPi = 2f * Math.PI.toFloat()
+    for (i in 0 until n) {
+        val angle = ((i + Random.nextFloat() - 0.5f) / n) * twoPi
+        val speed = 0.5f + Random.nextFloat() * Random.nextFloat() * 1.7f  // biased small, a few fast
+        val size = 0.05f + Random.nextFloat() * 0.12f
+        val color = CosmicPalette[Random.nextInt(CosmicPalette.size)]
+        val streak = Random.nextFloat() < 0.35f
+        ps.add(Particle(angle, speed, size, color, streak))
+    }
+    return Boom(cx, cy, baseR, System.nanoTime(), ps)
+}
+
+private fun DrawScope.drawBoom(b: Boom, frameNanos: Long) {
+    val t = ((frameNanos - b.startNanos).toFloat() / BOOM_DURATION_NS).coerceIn(0f, 1f)
+    if (t >= 1f) return
+    val ease = 1f - (1f - t) * (1f - t) * (1f - t)       // ease-out cubic
+    val c = Offset(b.cx, b.cy)
+
+    // white core flash — brightest at the instant of the tap, gone by a third of the way through
+    val flashA = (1f - t * 3f).coerceAtLeast(0f) * 0.9f
+    if (flashA > 0f) drawCircle(Color.White.copy(alpha = flashA), radius = b.baseR * (0.35f + 1.1f * t), center = c)
+
+    // two expanding shockwave rings
+    drawCircle(Color(0xFF9FE8FF).copy(alpha = (1f - t) * 0.5f), radius = b.baseR * (0.5f + 5.5f * ease),
+        center = c, style = Stroke(width = b.baseR * 0.10f))
+    drawCircle(Color(0xFFE0B3FF).copy(alpha = (1f - t) * 0.35f), radius = b.baseR * (0.3f + 3.6f * ease),
+        center = c, style = Stroke(width = b.baseR * 0.06f))
+
+    // radial particle burst (dots + streaks)
+    for (p in b.particles) {
+        val dist = b.baseR * (0.8f + p.speed * 5.5f * ease)
+        val dx = cos(p.angle) * dist; val dy = sin(p.angle) * dist
+        val pos = Offset(b.cx + dx, b.cy + dy)
+        val a = (1f - t) * (1f - t)
+        val col = p.color.copy(alpha = a)
+        if (p.streak) {
+            val back = Offset(b.cx + dx * 0.7f, b.cy + dy * 0.7f)
+            drawLine(col, back, pos, strokeWidth = b.baseR * p.size * 1.3f, cap = StrokeCap.Round)
+        } else {
+            drawCircle(col, radius = b.baseR * p.size * (1f - 0.4f * t), center = pos)
+        }
+    }
+}
+
+private fun rewardHaptic(view: View) {
+    val constant =
+        if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM
+        else HapticFeedbackConstants.KEYBOARD_TAP
+    view.performHapticFeedback(constant)
+}
 
 /**
  * The app's own on-screen keyboard, replacing the system IME. Laid out from [Kb] (an exact match of
@@ -111,17 +175,27 @@ private data class Glow(val cx: Float, val cy: Float, val keyWpx: Float)
  * [GameController.onTyped] path the IME used; shift/backspace/enter/comma/period/space are inert
  * landmarks kept for familiarity. During a typing round every letter in the target word lights up so
  * the child scans a smaller set. Any tap resolves to the NEAREST key (rectangle distance), so there
- * are no dead gaps — you can't miss. Each tap gives a haptic click and an expanding glow that reaches
- * well beyond the key. Both feedback effects are suppressed during the anti-mash grayscale.
+ * are no dead gaps — you can't miss.
+ *
+ * An accepted CORRECT letter is rewarded with a haptic and a cosmic explosion bursting from the key.
+ * Wrong letters and landmark taps get nothing but the anti-mash grayscale — so the celebration only
+ * ever rewards correct typing, never mashing.
  */
 @UnstableApi
 @Composable
 fun CustomKeyboard(controller: GameController, modifier: Modifier = Modifier) {
     val view = LocalView.current
-    val scope = rememberCoroutineScope()
     val keys = remember { buildKeys() }
-    val glowAnim = remember { Animatable(0f) }
-    var glow by remember { mutableStateOf<Glow?>(null) }
+    val booms = remember { mutableStateListOf<Boom>() }
+    var frameNanos by remember { mutableLongStateOf(0L) }
+
+    // Animate only while explosions are alive (no idle frame loop).
+    LaunchedEffect(booms.isNotEmpty()) {
+        while (booms.isNotEmpty()) {
+            withFrameNanos { frameNanos = it }
+            booms.removeAll { frameNanos - it.startNanos > BOOM_DURATION_NS }
+        }
+    }
 
     // Which letters to light up: the target word's letters, only while a round is active.
     val litSet: Set<Char> =
@@ -149,15 +223,22 @@ fun CustomKeyboard(controller: GameController, modifier: Modifier = Modifier) {
                             dx * dx + dy * dy
                         } ?: return@awaitEachGesture
 
-                        // Feedback only when interactive (gray = fully unresponsive, no reward).
-                        if (!controller.isCoolingDown) {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            glow = Glow((hit.xF + hit.wF / 2f) * wpx, (hit.yF + hit.hF / 2f) * wpx, hit.wF * wpx)
-                            scope.launch { glowAnim.snapTo(0f); glowAnim.animateTo(1f, tween(320)) }
-                        }
                         // Letters type; landmarks are inert but still count as non-progress input,
                         // so mashing them lands in the same boring grayscale (no reward loophole).
-                        controller.onTyped(if (hit.kind == KeyKind.LETTER) hit.char.toString() else " ")
+                        val correct = controller.onTyped(
+                            if (hit.kind == KeyKind.LETTER) hit.char.toString() else " "
+                        )
+                        // Reward ONLY an accepted correct letter — never a wrong tap or a mash.
+                        if (correct) {
+                            rewardHaptic(view)
+                            booms.add(
+                                makeBoom(
+                                    (hit.xF + hit.wF / 2f) * wpx,
+                                    (hit.yF + hit.hF / 2f) * wpx,
+                                    hit.wF * wpx,
+                                )
+                            )
+                        }
                     }
                 }
         ) {
@@ -185,22 +266,10 @@ fun CustomKeyboard(controller: GameController, modifier: Modifier = Modifier) {
                 }
             }
 
-            // Tap glow, drawn above the keys so it flashes over and beyond the tapped key.
-            Canvas(Modifier.fillMaxSize()) { drawGlow(glow, glowAnim.value) }
+            // Explosions, drawn above the keys (and allowed to burst beyond the keyboard).
+            Canvas(Modifier.fillMaxSize()) {
+                for (b in booms) drawBoom(b, frameNanos)
+            }
         }
     }
-}
-
-private fun DrawScope.drawGlow(glow: Glow?, progress: Float) {
-    if (glow == null || progress >= 1f) return
-    val radius = glow.keyWpx * (0.8f + 1.9f * progress)   // expands well past the key
-    val alpha = (1f - progress) * 0.5f
-    val center = Offset(glow.cx, glow.cy)
-    drawCircle(
-        brush = Brush.radialGradient(
-            listOf(GlowColor.copy(alpha = alpha), Color.Transparent),
-            center = center, radius = radius,
-        ),
-        radius = radius, center = center,
-    )
 }

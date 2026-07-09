@@ -241,16 +241,17 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
      * (gesture typing, suggestion taps) are treated as mashing outright. Deliberately no
      * sound or animation on the failure path — any reaction would reward mashing.
      */
-    fun onTyped(input: String) {
-        val current = round ?: return
-        if (!isTyping) return
+    /** @return true only when the input was the expected letter (so the keyboard can reward it). */
+    fun onTyped(input: String): Boolean {
+        val current = round ?: return false
+        if (!isTyping) return false
         if (isCoolingDown) {
             startCooldown(escalate = false) // any press while gray extends the gray
-            return
+            return false
         }
         if (input.length > 1) {
             startCooldown(escalate = true)
-            return
+            return false
         }
         val typed = input.single()
         val expected = current.word[typedCount].uppercaseChar()
@@ -263,8 +264,10 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             } else {
                 scheduleHint(FIRST_HINT_DELAY_MS) // correct letter resets the hint timer
             }
+            return true
         } else {
             startCooldown(escalate = true)
+            return false
         }
     }
 
