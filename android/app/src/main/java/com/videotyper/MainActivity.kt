@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -62,11 +63,25 @@ class MainActivity : ComponentActivity() {
                 var thumbRefresh by remember { mutableStateOf(0) }
 
                 val open: (String) -> Unit = { uriString ->
-                    persistUriPermissionIfPossible(uriString)
-                    recentsStore.add(uriString, resolveDisplayName(uriString))
-                    recents = recentsStore.recents()
-                    prefs.edit().putString("last_uri", uriString).apply()
-                    controller.openUri(uriString.toUri())
+                    // Only import (add to recents) once the video is confirmed to have an embedded
+                    // subtitle track — a subtitle-less video can't drive the typing game, so it's
+                    // rejected back to the menu instead of landing in recents.
+                    controller.openUri(uriString.toUri()) { hasSubs ->
+                        if (hasSubs) {
+                            persistUriPermissionIfPossible(uriString)
+                            recentsStore.add(uriString, resolveDisplayName(uriString))
+                            recents = recentsStore.recents()
+                            prefs.edit().putString("last_uri", uriString).apply()
+                        } else {
+                            controller.stop()
+                            showMenu = true
+                            Toast.makeText(
+                                this@MainActivity,
+                                "That video has no embedded subtitles, so it can't be used.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                     browseServer = null
                     showMenu = false
                 }
@@ -98,6 +113,10 @@ class MainActivity : ComponentActivity() {
                                 thumbRefresh = thumbRefresh,
                                 onPlay = open,
                                 onManageThumbnail = { manageVideo = it },
+                                onRemoveRecent = {
+                                    recentsStore.remove(it.uri)
+                                    recents = recentsStore.recents()
+                                },
                                 onBrowseServer = { browseServer = it },
                                 onAddServer = {
                                     serversStore.save(it)

@@ -29,8 +29,17 @@ class RecentsStore(context: Context) {
     /** Add or move a video to the front of the list, capped at [MAX] entries. */
     fun add(uri: String, name: String) {
         val updated = (listOf(RecentVideo(uri, name)) + recents().filterNot { it.uri == uri }).take(MAX)
+        write(updated)
+    }
+
+    /** Drop a video from the recents list (Edit-mode remove). */
+    fun remove(uri: String) {
+        write(recents().filterNot { it.uri == uri })
+    }
+
+    private fun write(list: List<RecentVideo>) {
         val arr = JSONArray()
-        updated.forEach { arr.put(JSONObject().put("uri", it.uri).put("name", it.name)) }
+        list.forEach { arr.put(JSONObject().put("uri", it.uri).put("name", it.name)) }
         prefs.edit().putString(KEY, arr.toString()).apply()
     }
 

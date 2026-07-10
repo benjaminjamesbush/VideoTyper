@@ -68,6 +68,7 @@ fun MenuScreen(
     thumbRefresh: Int,
     onPlay: (String) -> Unit,
     onManageThumbnail: (RecentVideo) -> Unit,
+    onRemoveRecent: (RecentVideo) -> Unit,
     onBrowseServer: (SmbServer) -> Unit,
     onAddServer: (SmbServer) -> Unit,
     onDeleteServer: (SmbServer) -> Unit,
@@ -79,6 +80,7 @@ fun MenuScreen(
     ) { uri -> if (uri != null) onPlay(uri.toString()) }
 
     var showAddServer by remember { mutableStateOf(false) }
+    var editRecents by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -105,7 +107,19 @@ fun MenuScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        SectionLabel("Recent")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Recent", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (recents.isNotEmpty()) {
+                TextButton(onClick = { editRecents = !editRecents }) {
+                    Text(if (editRecents) "Done" else "Edit", color = Color(0xFF9FD4FF))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         // SMB recents are shown only if their server answers right now (checked when this screen
         // opens, with short timeouts); local/http recents always show. Non-network ones appear
         // immediately, network ones pop in once confirmed reachable.
@@ -133,12 +147,17 @@ fun MenuScreen(
                     RecentCard(
                         video = video,
                         thumbRefresh = thumbRefresh,
+                        editMode = editRecents,
                         onClick = { onPlay(video.uri) },
                         onManage = { onManageThumbnail(video) },
+                        onRemove = { onRemoveRecent(video) },
                     )
                 }
             }
-            Text("Tip: tap ✎ on a poster to fix its thumbnail.", color = Color.Gray, fontSize = 11.sp)
+            Text(
+                if (editRecents) "Tap ✕ to remove a video · ✎ to fix its poster." else "Tap Edit to remove videos or fix posters.",
+                color = Color.Gray, fontSize = 11.sp
+            )
         }
 
         Spacer(Modifier.height(28.dp))
@@ -275,7 +294,14 @@ private fun AddServerDialog(onDismiss: () -> Unit, onSave: (SmbServer) -> Unit) 
 }
 
 @Composable
-private fun RecentCard(video: RecentVideo, thumbRefresh: Int, onClick: () -> Unit, onManage: () -> Unit) {
+private fun RecentCard(
+    video: RecentVideo,
+    thumbRefresh: Int,
+    editMode: Boolean,
+    onClick: () -> Unit,
+    onManage: () -> Unit,
+    onRemove: () -> Unit,
+) {
     val context = LocalContext.current
     // Portrait poster shape (2:3) like Plex/Emby; frame-grab fallbacks are center-cropped into it.
     val thumb by produceState<Bitmap?>(initialValue = null, key1 = video.uri, key2 = thumbRefresh) {
@@ -289,7 +315,8 @@ private fun RecentCard(video: RecentVideo, thumbRefresh: Int, onClick: () -> Uni
                 .height(180.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(PanelGray)
-                .clickable(onClick = onClick),
+                // In edit mode the card doesn't play — the ✕/✎ overlays are the actions.
+                .then(if (editMode) Modifier else Modifier.clickable(onClick = onClick)),
             contentAlignment = Alignment.Center
         ) {
             val t = thumb
@@ -303,17 +330,30 @@ private fun RecentCard(video: RecentVideo, thumbRefresh: Int, onClick: () -> Uni
             } else {
                 Text("▶", color = Color.Gray, fontSize = 28.sp)
             }
-            // Edit affordance to fix the thumbnail.
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xCC000000))
-                    .clickable(onClick = onManage)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text("✎", color = Color.White, fontSize = 14.sp)
+            // No overlays by default (clean thumbnails); editing controls appear only in Edit mode.
+            if (editMode) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xE0C0392B))
+                        .clickable(onClick = onRemove)
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text("✕", color = Color.White, fontSize = 14.sp)
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xCC000000))
+                        .clickable(onClick = onManage)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text("✎", color = Color.White, fontSize = 14.sp)
+                }
             }
         }
         Spacer(Modifier.height(4.dp))

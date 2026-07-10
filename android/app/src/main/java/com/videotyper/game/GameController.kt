@@ -102,10 +102,15 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     // ---------------------------------------------------------------- media control
 
-    fun openUri(uri: Uri) {
+    // Fired once when the just-opened media's tracks resolve, with whether it has a text subtitle
+    // track. Used to reject subtitle-less videos at import time (they can't drive the typing game).
+    private var subtitleCheck: ((Boolean) -> Unit)? = null
+
+    fun openUri(uri: Uri, onSubtitleCheck: ((Boolean) -> Unit)? = null) {
         resetGameState()
         completedCues.clear()
         statusMessage = null
+        subtitleCheck = onSubtitleCheck
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
         player.play()
@@ -199,10 +204,19 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     override fun onPlayerError(error: PlaybackException) {
         statusMessage = "Playback error: ${error.errorCodeName}"
+        // A load failure can't be a valid import either.
+        subtitleCheck?.invoke(false)
+        subtitleCheck = null
     }
 
     override fun onTracksChanged(tracks: Tracks) {
         val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        // One-time import validation: once the tracks resolve (audio/video present), report whether a
+        // text subtitle track exists so the caller can reject subtitle-less videos.
+        if (tracks.groups.isNotEmpty()) {
+            subtitleCheck?.invoke(textGroups.isNotEmpty())
+            subtitleCheck = null
+        }
         if (textGroups.isEmpty()) {
             if (hasMedia && tracks.groups.isNotEmpty()) {
                 statusMessage = "No subtitle track in this video — typing game disabled"
