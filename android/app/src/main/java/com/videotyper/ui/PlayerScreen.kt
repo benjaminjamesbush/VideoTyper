@@ -150,7 +150,16 @@ fun PlayerScreen(
         // extracted, so playback never starts mid-load (and practice jumps always have the timeline).
         if (controller.isLoading) {
             Box(
-                Modifier.fillMaxSize().background(Color.Black),
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    // Swallow all touches so nothing underneath (video debug gesture, controls) reacts
+                    // while loading — otherwise a stray tap could start practice before playback begins.
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) { awaitPointerEvent().changes.forEach { it.consume() } }
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
