@@ -208,6 +208,9 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     /** Any tap/drag; resets the idle-to-reward countdown. Called from the player's pointer input. */
     fun onUserActivity() { lastActivityMs = SystemClock.uptimeMillis() }
 
+    /** Debug (secret gesture): skip the reward wait — same as the 5-minute timer firing. */
+    fun debugForcePractice() = endReward()
+
     private fun noteActivity() { lastActivityMs = SystemClock.uptimeMillis() }
 
     private fun fillStarsAndEnterReward(auto: Boolean) {

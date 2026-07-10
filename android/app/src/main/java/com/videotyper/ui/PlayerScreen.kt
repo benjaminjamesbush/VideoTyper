@@ -8,6 +8,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -112,8 +113,21 @@ fun PlayerScreen(
         val keyboardHeight = maxWidth * KEYBOARD_HEIGHT_FRACTION
         val videoHeight = minOf(maxWidth * 9f / 16f, maxHeight - BottomUiReserve - keyboardHeight)
             .coerceAtLeast(120.dp)
+        // Secret debug gesture: 5 taps on the video within 3 s empties the star board (skips the
+        // 5-minute reward wait), so the practice transition can be tested without waiting.
+        val videoTaps = remember { ArrayList<Long>() }
         Column(Modifier.fillMaxSize()) {
-            VideoSurface(controller, Modifier.fillMaxWidth().height(videoHeight))
+            VideoSurface(
+                controller,
+                Modifier.fillMaxWidth().height(videoHeight).pointerInput(Unit) {
+                    detectTapGestures {
+                        val now = System.currentTimeMillis()
+                        videoTaps.add(now)
+                        videoTaps.removeAll { now - it > 3000 }
+                        if (videoTaps.size >= 5) { videoTaps.clear(); controller.debugForcePractice() }
+                    }
+                }
+            )
             SubtitleStrip(controller)
             controller.statusMessage?.let {
                 Text(
