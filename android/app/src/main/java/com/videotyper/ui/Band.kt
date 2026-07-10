@@ -1,4 +1,4 @@
-package com.videotyper.preview
+package com.videotyper.ui
 
 /**
  * Geometry of the scrub-bar band passed to every candidate celebration animation, in overlay pixels.

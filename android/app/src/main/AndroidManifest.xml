@@ -21,19 +21,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Standalone harness for judging candidate scrub-bar unlock celebrations. Its own launcher
-             icon ("VT Preview") so it can be opened any time; separate from the game. -->
-        <activity
-            android:name=".preview.PreviewActivity"
-            android:exported="true"
-            android:label="VT Preview"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.VideoTyper">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
     </application>
 </manifest>

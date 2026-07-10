@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.videotyper.data.SubtitleIndex
 import com.videotyper.player.SchemeDataSourceFactory
+import com.videotyper.ui.CELEBRATION_COUNT
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,7 +112,12 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     var showPracticePrompt by mutableStateOf(false); private set // black "It's time to practice" screen
     var starEarnTick by mutableStateOf(0); private set          // ++ when a star is earned (UI burst)
     var lastStarIndex by mutableStateOf(-1); private set        // slot 0..2 just earned (-1 = auto-filled)
-    var scrubUnlockTick by mutableStateOf(0); private set       // ++ when the scrub bar unlocks (UI burst)
+    var scrubUnlockTick by mutableStateOf(0); private set       // ++ when the scrub bar unlocks (UI plays a celebration)
+    var celebrationId by mutableStateOf(0); private set         // which unlock celebration to play this time
+
+    // Unlock celebrations are shuffled once per app launch, then cycled through on each unlock.
+    private val celebrationOrder = (0 until CELEBRATION_COUNT).toList().shuffled()
+    private var celebrationCursor = 0
 
     // ---- engine state ----
     private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
@@ -239,6 +245,9 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     /** Unlock the scrub bar for REWARD_MS, then bounce back to practice. */
     private fun enterReward() {
         scrubUnlocked = true
+        // Pick the next celebration in the shuffled cycle, then bump the tick so the UI plays it.
+        celebrationId = celebrationOrder[celebrationCursor % celebrationOrder.size]
+        celebrationCursor += 1
         scrubUnlockTick += 1
         audio.playUnlock()
         restartRewardTimer()

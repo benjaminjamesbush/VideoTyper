@@ -1,4 +1,4 @@
-package com.videotyper.preview
+package com.videotyper.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
