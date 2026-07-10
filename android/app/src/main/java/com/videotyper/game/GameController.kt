@@ -59,6 +59,11 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val REPLAY_MATCH_WINDOW_MS = 3_000L
         private const val COMPLETED_CUE_MEMORY = 100
 
+        // Minimum movie-time gap between typing prompts: a line that begins within this of the last
+        // typed line's end plays through without a prompt, so prompts aren't back-to-back.
+        private const val MIN_PROMPT_GAP_MS = 5_000L
+        private const val NO_PROMPT_YET = -1_000_000L  // sentinel: no prompt shown yet in this run
+
         // Anti-mash cooldown: a wrong key silently turns the whole screen flat gray and
         // ignores input; presses while gray extend it, repeats double it up to the max.
         private const val COOLDOWN_BASE_MS = 1_000L
@@ -146,6 +151,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var activeCue: ActiveCue? = null
     private var round: Round? = null
     private val completedCues = ArrayDeque<CompletedCue>()
+    private var lastPromptedCueEndMs = NO_PROMPT_YET  // movie time of the last presented prompt's cue end
     private var hintJob: Job? = null
     private var resumeJob: Job? = null
     private var gameSeekInProgress = false
@@ -417,6 +423,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             audio.stopSpeaking()
         } else {
             activeCue = null
+            lastPromptedCueEndMs = NO_PROMPT_YET  // fresh prompt-spacing run after a manual scrub
             clearSubtitleDisplay()
         }
         player.seekTo(positionMs)
@@ -544,7 +551,10 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         } else {
             val positionMs = player.currentPosition
             val alreadyDone = wasRecentlyCompleted(newText, positionMs)
-            val word = if (!alreadyDone && WordSelector.hasTypeableWords(newText)) {
+            // Space out prompts: a line beginning within MIN_PROMPT_GAP_MS (movie time) of the last
+            // typed line's end plays through without a prompt (not made typeable).
+            val tooSoon = positionMs - lastPromptedCueEndMs < MIN_PROMPT_GAP_MS
+            val word = if (!alreadyDone && !tooSoon && WordSelector.hasTypeableWords(newText)) {
                 WordSelector.selectWord(newText)
             } else null
             activeCue = ActiveCue(newText, positionMs, word, alreadyDone)
@@ -652,6 +662,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         cancelHints()
         isTyping = false
         rememberCompleted(current.text, current.cueStartMs, current.cueEndMs)
+        lastPromptedCueEndMs = current.cueEndMs   // anchor the next prompt's 5s spacing window here
         noteActivity()
 
         if (stars < STARS_NEEDED) {
@@ -752,6 +763,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         isTyping = false
         isLoading = false
         gameSeekInProgress = false
+        lastPromptedCueEndMs = NO_PROMPT_YET  // a scrub/jump/open starts a fresh prompt-spacing run
         clearSubtitleDisplay()
     }
 }
