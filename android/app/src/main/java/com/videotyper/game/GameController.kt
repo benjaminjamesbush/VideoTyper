@@ -31,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import kotlin.math.log10
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -79,6 +80,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val VOLUME_MIN = 100f
         private const val VOLUME_MAX = 2000f
         private const val VOLUME_DEFAULT = 200
+        private const val VOLUME_MAP_KEY = "volume_by_title"  // prefs: { videoUri -> percent }
     }
 
     private val appContext = context.applicationContext
@@ -130,10 +132,11 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private val celebrationOrder = (0 until CELEBRATION_COUNT).toList().shuffled()
     private var celebrationCursor = 0
 
-    // Movie volume boost, adjustable by swiping the video (100%..500%, persisted across sessions).
-    var volumePercent by mutableStateOf(prefs.getInt("volume_percent", VOLUME_DEFAULT)); private set
-    private var volumeGainPercent = volumePercent.toFloat()
+    // Movie volume boost, adjustable by swiping the video (100%..2000%), remembered per title.
+    var volumePercent by mutableStateOf(VOLUME_DEFAULT); private set
+    private var volumeGainPercent = VOLUME_DEFAULT.toFloat()
     private var loudnessEnhancer: LoudnessEnhancer? = null
+    private var currentUri: String? = null
 
     // ---- engine state ----
     private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
@@ -173,28 +176,50 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         completedCues.clear()
         statusMessage = null
         subtitleCheck = onSubtitleCheck
+        val uriStr = uri.toString()
+        currentUri = uriStr
         typeableCueStartsMs = emptyList()
-        isLoading = true
-        loadProgress = 0f
+
+        // Per-title volume: restore the last boost used for this video (or the default).
+        volumeGainPercent = volumeForUri(uriStr).toFloat()
+        volumePercent = volumeGainPercent.roundToInt()
+        try { loudnessEnhancer?.setTargetGain(gainMillibels(volumeGainPercent)) } catch (_: Exception) {}
+
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
         hasMedia = true
 
-        // Pull the full typeable-cue timeline BEFORE playback (off the main thread), showing a loading
-        // screen meanwhile, so: (a) practice jumps always have the timeline, and (b) the child never
-        // starts mid-load. Only once it's ready do we start the movie and the opening scrub reward.
-        subtitleIndexJob = scope.launch {
-            val idx = withTimeoutOrNull(SUBTITLE_INDEX_LOAD_TIMEOUT_MS) {
-                withContext(Dispatchers.IO) {
-                    SubtitleIndex.typeableCueStartsMs(appContext, uri.toString()) { p -> loadProgress = p }
-                }
-            } ?: emptyList()
-            if (token != openToken) return@launch  // superseded by another open, or the video was rejected/left
-            typeableCueStartsMs = idx
-            Log.d(TAG, "subtitle index loaded: ${idx.size} typeable cues")
+        // If we've already indexed this title, reuse the cached cue timeline — no rescan, no loading
+        // screen, straight into playback + the opening reward.
+        val cachedIndex = SubtitleIndex.cached(appContext, uriStr)
+        if (cachedIndex != null) {
+            Log.d(TAG, "subtitle index cache hit: ${cachedIndex.size} typeable cues")
+            typeableCueStartsMs = cachedIndex
             isLoading = false
             player.play()
-            // A freshly opened video starts with a full board -> the scrub-bar reward, then practice.
+            fillStarsAndEnterReward(auto = true)
+            startIdleMonitor()
+            return
+        }
+
+        // First open of this title: pull the full typeable-cue timeline BEFORE playback (off the main
+        // thread) behind a progress bar, so practice jumps always have the timeline and the child never
+        // starts mid-load. Cache the result so subsequent opens are instant.
+        isLoading = true
+        loadProgress = 0f
+        subtitleIndexJob = scope.launch {
+            val scanned = withTimeoutOrNull(SUBTITLE_INDEX_LOAD_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) {
+                    SubtitleIndex.typeableCueStartsMs(appContext, uriStr) { p -> loadProgress = p }
+                }
+            }
+            if (token != openToken) return@launch  // superseded by another open, or the video was rejected/left
+            val idx = scanned ?: emptyList()
+            typeableCueStartsMs = idx
+            if (scanned != null) SubtitleIndex.cache(appContext, uriStr, idx)  // only cache a completed scan
+            Log.d(TAG, "subtitle index loaded: ${idx.size} typeable cues (cached=${scanned != null})")
+            isLoading = false
+            player.play()
             fillStarsAndEnterReward(auto = true)
             startIdleMonitor()
         }
@@ -444,9 +469,22 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         try { loudnessEnhancer?.setTargetGain(gainMillibels(volumeGainPercent)) } catch (_: Exception) {}
     }
 
-    /** Persist the volume once a swipe finishes (kept out of the per-frame drag path). */
+    /** Persist the volume for the current title once a swipe finishes (out of the per-frame path). */
     fun commitVolume() {
-        prefs.edit().putInt("volume_percent", volumePercent).apply()
+        val uri = currentUri ?: return
+        val map = readVolumeMap()
+        map.put(uri, volumePercent)
+        prefs.edit().putString(VOLUME_MAP_KEY, map.toString()).apply()
+    }
+
+    /** Last boost used for [uri] (percent), or the default if never set. */
+    private fun volumeForUri(uri: String): Int =
+        readVolumeMap().optInt(uri, VOLUME_DEFAULT).coerceIn(VOLUME_MIN.toInt(), VOLUME_MAX.toInt())
+
+    private fun readVolumeMap(): JSONObject = try {
+        JSONObject(prefs.getString(VOLUME_MAP_KEY, "{}") ?: "{}")
+    } catch (e: Exception) {
+        JSONObject()
     }
 
     /** Convert a percent gain (100 = unity) to LoudnessEnhancer target gain in millibels. */

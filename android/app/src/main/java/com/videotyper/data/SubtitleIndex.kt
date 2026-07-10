@@ -7,8 +7,10 @@ import android.net.Uri
 import com.videotyper.game.WordSelector
 import com.videotyper.player.SmbMediaDataSource
 import com.videotyper.player.SmbSupport
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 /**
  * One-time offline pull of the embedded subtitle track's cue timeline, so the star system can jump
@@ -65,6 +67,37 @@ object SubtitleIndex {
         } finally {
             try { ex.release() } catch (_: Exception) {}
         }
+    }
+
+    // ---- persistent per-title cache so a video is only scanned once ----
+    // Bump if the eligibility logic (WordSelector/cleanCue) changes, to invalidate stale caches.
+    private const val CACHE_VERSION = 1
+
+    /** Cached typeable-cue timeline for [uriString], or null if never indexed. */
+    fun cached(context: Context, uriString: String): List<Long>? {
+        val f = cacheFile(context, uriString)
+        if (!f.exists()) return null
+        return try {
+            val text = f.readText().trim()
+            if (text.isEmpty()) emptyList() else text.split(",").map { it.toLong() }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Persist the timeline for [uriString] so the next open skips the scan. */
+    fun cache(context: Context, uriString: String, starts: List<Long>) {
+        try {
+            cacheFile(context, uriString).writeText(starts.joinToString(","))
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun cacheFile(context: Context, uriString: String): File {
+        val dir = File(context.filesDir, "cueindex_v$CACHE_VERSION").apply { mkdirs() }
+        val hash = MessageDigest.getInstance("MD5").digest(uriString.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return File(dir, "$hash.csv")
     }
 
     private fun isTextSubtitle(fmt: MediaFormat): Boolean {
