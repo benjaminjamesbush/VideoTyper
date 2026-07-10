@@ -275,7 +275,6 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         }
         resetGameState()           // end any in-progress round; freeze cues while the prompt shows
         scrubUnlocked = false
-        showPracticePrompt = true
         player.pause()
         audio.stopSpeaking()
 
@@ -288,9 +287,17 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
                 jumpToPracticeStart()
             }
         }
-        audio.speakThrice("It's time to practice typing!") { doJump() }
-        // Safety net so we always jump even if TTS never signals done (e.g. backgrounded).
-        promptJob = scope.launch { delay(PROMPT_FALLBACK_MS); doJump() }
+        if (suspended) {
+            // Screen off / backgrounded: the reward still times out, but never announce off-screen.
+            // Skip the spoken prompt (and the black takeover) and jump straight to a practice line;
+            // playback stays paused until the app is foregrounded again (see jumpToPracticeStart).
+            doJump()
+        } else {
+            showPracticePrompt = true
+            audio.speakThrice("It's time to practice typing!") { doJump() }
+            // Safety net so we always jump even if TTS never signals done.
+            promptJob = scope.launch { delay(PROMPT_FALLBACK_MS); doJump() }
+        }
     }
 
     private fun jumpToPracticeStart() {
@@ -312,7 +319,8 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
                 clearSubtitleDisplay()
                 player.seekTo(target)
             }
-            player.play()
+            // Don't resume audio while backgrounded; like any screen-off pause, it plays on return.
+            if (!suspended) player.play()
         }
     }
 
@@ -334,7 +342,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         idleJob = scope.launch {
             while (true) {
                 delay(IDLE_CHECK_MS)
-                if (stars < STARS_NEEDED &&
+                if (stars < STARS_NEEDED && !suspended &&   // don't auto-reward (a sound) while backgrounded
                     SystemClock.uptimeMillis() - lastActivityMs >= IDLE_MS
                 ) {
                     fillStarsAndEnterReward(auto = true)
