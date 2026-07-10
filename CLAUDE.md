@@ -4,6 +4,10 @@ VideoTyper is a typing game application that plays videos with subtitles, period
 
 Two implementations live in this repo: the original desktop app (`video_player.py`, Python + VLC + tkinter; see `DESKTOP.md`) and a native Android port (`android/`, Kotlin + Jetpack Compose + Media3/ExoPlayer — the maintained version, documented on the front-page `README.md`). The Android app is portrait-only, uses the system on-screen keyboard for typing, and plays videos from local storage, `smb://` network shares (jcifs-ng), or `http(s)://` URLs. Build note: the repo sits on a network share whose I/O is flaky under Gradle, so build output is routed to `C:\Users\Ben\.videotyper\` via `videotyper.localBuildDir` in `android/gradle.properties`, and builds should pass `--project-cache-dir C:\Users\Ben\.videotyper\gradle-cache`.
 
+## Handling requests (order + focus)
+
+Handle the user's requests in the order they are received, and don't get derailed. Claude Code surfaces follow-up requests as mid-turn messages while a task is in flight — when one arrives, finish the current change first (build, verify on-device, and commit it) before starting the new one. Never drop, silently interleave, or lose track of an in-flight task because a new request came in; queue new requests and work through them in order.
+
 ## Phone / adb safety (OLED screen)
 
 Apollo's phone is tested over wireless adb and has an OLED screen (burn-in risk). A PreToolUse hook (`.claude/settings.json`) blocks any `svc power stayon true` / non-zero `stay_on_while_plugged_in` command, so the screen is never left on while charging — don't work around it; use a one-shot `adb shell input keyevent KEYCODE_WAKEUP` for a brief wake. The app's own `FLAG_KEEP_SCREEN_ON` is deliberately scoped to active playback only (cleared when paused, including every typing round).
