@@ -155,12 +155,12 @@ fun PlayerScreen(
                         }
                     }
                     // Swipe up/down over the video to raise/lower the movie volume. One full-height
-                    // swipe = 25% (so the 100%..500% range takes several deliberate swipes).
+                    // swipe = 100% (so the 100%..2000% range takes several deliberate swipes).
                     .pointerInput(Unit) {
                         detectVerticalDragGestures(
                             onDragEnd = { controller.commitVolume() },
                             onVerticalDrag = { _, dragAmount ->
-                                if (size.height > 0) controller.nudgeVolume(-dragAmount / size.height * 25f)
+                                if (size.height > 0) controller.nudgeVolume(-dragAmount / size.height * 100f)
                             }
                         )
                     }

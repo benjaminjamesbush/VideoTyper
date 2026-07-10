@@ -75,9 +75,9 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val TAG = "VTStar"
 
         // Movie volume boost: the movies are mastered quiet vs the game SFX, so we amplify their audio
-        // above unity via a LoudnessEnhancer. Adjustable 100%..500% (1x..5x) by swiping the video.
+        // above unity via a LoudnessEnhancer. Adjustable 100%..2000% by swiping the video.
         private const val VOLUME_MIN = 100f
-        private const val VOLUME_MAX = 500f
+        private const val VOLUME_MAX = 2000f
         private const val VOLUME_DEFAULT = 200
     }
 
