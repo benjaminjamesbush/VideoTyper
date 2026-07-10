@@ -115,6 +115,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     var hasMedia by mutableStateOf(false); private set
     var isCoolingDown by mutableStateOf(false); private set
     var isLoading by mutableStateOf(false); private set   // preparing a freshly opened video (extracting its cue timeline)
+    var loadProgress by mutableStateOf(0f); private set   // 0..1 extraction progress for the loading bar
 
     // ---- star / token board ----
     var stars by mutableStateOf(0); private set                 // 0..STARS_NEEDED
@@ -174,6 +175,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         subtitleCheck = onSubtitleCheck
         typeableCueStartsMs = emptyList()
         isLoading = true
+        loadProgress = 0f
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
         hasMedia = true
@@ -184,7 +186,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         subtitleIndexJob = scope.launch {
             val idx = withTimeoutOrNull(SUBTITLE_INDEX_LOAD_TIMEOUT_MS) {
                 withContext(Dispatchers.IO) {
-                    SubtitleIndex.typeableCueStartsMs(appContext, uri.toString())
+                    SubtitleIndex.typeableCueStartsMs(appContext, uri.toString()) { p -> loadProgress = p }
                 }
             } ?: emptyList()
             if (token != openToken) return@launch  // superseded by another open, or the video was rejected/left

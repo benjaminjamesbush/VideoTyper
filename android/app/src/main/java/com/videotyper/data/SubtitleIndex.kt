@@ -19,12 +19,24 @@ import java.nio.charset.StandardCharsets
  */
 object SubtitleIndex {
 
-    fun typeableCueStartsMs(context: Context, uriString: String): List<Long> {
+    /**
+     * @param onProgress optional 0f..1f callback as the subtitle track is scanned (cue timestamp /
+     *   total duration) — cues span the whole movie, so this is a meaningful loading estimate.
+     */
+    fun typeableCueStartsMs(
+        context: Context,
+        uriString: String,
+        onProgress: ((Float) -> Unit)? = null,
+    ): List<Long> {
         val ex = MediaExtractor()
         return try {
             setDataSource(context, ex, uriString)
             val track = (0 until ex.trackCount).firstOrNull { isTextSubtitle(ex.getTrackFormat(it)) }
                 ?: return emptyList()
+            // Longest track duration (µs) = movie length, the denominator for progress.
+            val durationUs = (0 until ex.trackCount).maxOf { i ->
+                ex.getTrackFormat(i).let { if (it.containsKey(MediaFormat.KEY_DURATION)) it.getLong(MediaFormat.KEY_DURATION) else 0L }
+            }
             ex.selectTrack(track)
             val buf = ByteBuffer.allocate(128 * 1024)
             val starts = ArrayList<Long>()
@@ -41,9 +53,11 @@ object SubtitleIndex {
                     if (text.isNotEmpty() && WordSelector.selectWord(text) != null) {
                         starts.add(timeUs / 1000)
                     }
+                    if (durationUs > 0) onProgress?.invoke((timeUs.toFloat() / durationUs).coerceIn(0f, 1f))
                 }
                 if (!ex.advance()) break
             }
+            onProgress?.invoke(1f)
             starts.sort()
             starts
         } catch (e: Exception) {

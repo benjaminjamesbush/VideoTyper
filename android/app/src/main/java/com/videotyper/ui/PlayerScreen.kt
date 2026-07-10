@@ -25,9 +25,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -235,9 +236,16 @@ fun PlayerScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = HighlightYellow)
-                    Spacer(Modifier.height(20.dp))
                     Text("Loading…", color = Color.White, fontSize = 18.sp)
+                    Spacer(Modifier.height(16.dp))
+                    LinearProgressIndicator(
+                        progress = { controller.loadProgress },
+                        color = HighlightYellow,
+                        trackColor = TrackInactive,
+                        modifier = Modifier.width(220.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("${(controller.loadProgress * 100).toInt()}%", color = Color.White, fontSize = 14.sp)
                 }
             }
         }
