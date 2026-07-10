@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -34,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -62,6 +65,8 @@ private val HighlightYellow = Color(0xFFFFEB3B)
 private val FlashRed = Color(0xFFE53935)
 private val StarGold = Color(0xFFFFD740)
 private val StarDim = Color(0x55FFFFFF)
+private val TrackActive = Color(0xFFD0BCFF)
+private val TrackInactive = Color(0x59FFFFFF)
 
 // Vertical space kept for the subtitle strip + scrub bar + controls (everything between the video
 // and the keyboard), so the video can never grow large enough to push them off-screen on near-square
@@ -278,6 +283,7 @@ private fun AnnotatedString.Builder.withStyle(style: SpanStyle, block: Annotated
  * visibly are the scrub bar's lock. A star earned pops a cosmic burst behind its slot; unlocking the
  * bar pops a screen-width burst around it.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @UnstableApi
 @Composable
 private fun StarScrubBand(controller: GameController) {
@@ -315,26 +321,20 @@ private fun StarScrubBand(controller: GameController) {
         }
     }
 
+    val sliderFrac = if (dragValue >= 0f) dragValue
+        else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
+
     Box(
         Modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(56.dp)
             .onSizeChanged { bandW = it.width.toFloat(); bandH = it.height.toFloat() }
     ) {
-        Row(
-            Modifier.fillMaxWidth().align(Alignment.Center),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            repeat(3) { i ->
-                val filled = i < controller.stars
-                Text(if (filled) "★" else "☆", color = if (filled) StarGold else StarDim, fontSize = 26.sp)
-            }
-        }
+        // Scrub bar (drawn first = behind the stars) — only while unlocked. Custom track is ~half the
+        // default thickness so the stars read clearly; the default thumb (playhead) is kept as-is.
         if (controller.scrubUnlocked) {
             Slider(
-                value = if (dragValue >= 0f) dragValue
-                else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
+                value = sliderFrac,
                 onValueChange = { dragValue = it; controller.onUserActivity() },
                 onValueChangeFinished = {
                     if (dragValue >= 0f && durationMs > 0) controller.seekTo((dragValue * durationMs).toLong())
@@ -342,9 +342,32 @@ private fun StarScrubBand(controller: GameController) {
                 },
                 enabled = controller.hasMedia,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).align(Alignment.Center),
+                track = { _ ->
+                    Box(Modifier.fillMaxWidth().height(7.dp)) {
+                        Box(Modifier.fillMaxWidth().height(7.dp).clip(CircleShape).background(TrackInactive))
+                        if (sliderFrac > 0f) {
+                            Box(
+                                Modifier.fillMaxWidth(sliderFrac.coerceIn(0.002f, 1f)).height(7.dp)
+                                    .clip(CircleShape).background(TrackActive)
+                            )
+                        }
+                    }
+                },
             )
         }
+        // Bursts behind the stars, over the bar.
         CosmicCanvas(bursts, Modifier.fillMaxSize())
+        // Star slots ON TOP of the scrub bar, 2x size.
+        Row(
+            Modifier.fillMaxWidth().align(Alignment.Center),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(3) { i ->
+                val filled = i < controller.stars
+                Text(if (filled) "★" else "☆", color = if (filled) StarGold else StarDim, fontSize = 52.sp)
+            }
+        }
     }
 }
 
