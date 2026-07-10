@@ -2,6 +2,7 @@ package com.videotyper.game
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,12 +18,16 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import com.videotyper.data.SubtitleIndex
 import com.videotyper.player.SchemeDataSourceFactory
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 /**
  * The VideoTyper game engine, ported from the desktop video_player.py.
@@ -51,7 +56,16 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         // ignores input; presses while gray extend it, repeats double it up to the max.
         private const val COOLDOWN_BASE_MS = 1_000L
         private const val COOLDOWN_MAX_MS = 8_000L
+
+        // Star / token board: type words to earn stars; 3 stars unlock the scrub bar for a while.
+        private const val STARS_NEEDED = 3
+        private const val REWARD_MS = 5 * 60 * 1000L      // scrub-bar unlocked window
+        private const val IDLE_MS = 5 * 60 * 1000L        // no input this long -> auto-fill to 3 stars
+        private const val IDLE_CHECK_MS = 15_000L         // how often the idle monitor checks
+        private const val PROMPT_FALLBACK_MS = 9_000L     // jump anyway if the spoken prompt never signals done
     }
+
+    private val appContext = context.applicationContext
 
     val audio = AudioFeedback(context, scope)
 
@@ -84,6 +98,14 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     var hasMedia by mutableStateOf(false); private set
     var isCoolingDown by mutableStateOf(false); private set
 
+    // ---- star / token board ----
+    var stars by mutableStateOf(0); private set                 // 0..STARS_NEEDED
+    var scrubUnlocked by mutableStateOf(false); private set     // reward: scrub bar available
+    var showPracticePrompt by mutableStateOf(false); private set // black "It's time to practice" screen
+    var starEarnTick by mutableStateOf(0); private set          // ++ when a star is earned (UI burst)
+    var lastStarIndex by mutableStateOf(-1); private set        // slot 0..2 just earned (-1 = auto-filled)
+    var scrubUnlockTick by mutableStateOf(0); private set       // ++ when the scrub bar unlocks (UI burst)
+
     // ---- engine state ----
     private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
     private data class Round(val text: String, val word: String, val cueStartMs: Long, val cueEndMs: Long)
@@ -100,6 +122,13 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var wrongStreak = 0
     private var suspended = false // app not in the foreground (screen off / navigated away)
 
+    // Star board / reward timers + the subtitle timeline used to pick a safe practice jump.
+    private var rewardJob: Job? = null
+    private var idleJob: Job? = null
+    private var promptJob: Job? = null
+    private var lastActivityMs = 0L
+    private var typeableCueStartsMs: List<Long> = emptyList()
+
     // ---------------------------------------------------------------- media control
 
     // Fired once when the just-opened media's tracks resolve, with whether it has a text subtitle
@@ -108,13 +137,28 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     fun openUri(uri: Uri, onSubtitleCheck: ((Boolean) -> Unit)? = null) {
         resetGameState()
+        resetStarState()
         completedCues.clear()
         statusMessage = null
         subtitleCheck = onSubtitleCheck
+        typeableCueStartsMs = emptyList()
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
         player.play()
         hasMedia = true
+
+        // Pull the full typeable-cue timeline once (off the main thread) so practice jumps can land
+        // on a line that still has >= 3 opportunities after it.
+        scope.launch {
+            val idx = withContext(Dispatchers.IO) {
+                SubtitleIndex.typeableCueStartsMs(appContext, uri.toString())
+            }
+            typeableCueStartsMs = idx
+        }
+
+        // A freshly opened video starts with a full board -> the scrub-bar reward, then practice.
+        fillStarsAndEnterReward(auto = true)
+        startIdleMonitor()
     }
 
     fun playPause() {
@@ -124,6 +168,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     fun stop() {
         resetGameState()
+        resetStarState()
         player.pause()
         player.seekTo(0)
     }
@@ -131,6 +176,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     /** Leave gameplay for the menu: end any typing round and pause. */
     fun leaveGame() {
         resetGameState()
+        resetStarState()
         player.pause()
     }
 
@@ -156,12 +202,112 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         }
     }
 
+    // ---------------------------------------------------------------- star / token board
+
+    /** Any tap/drag; resets the idle-to-reward countdown. Called from the player's pointer input. */
+    fun onUserActivity() { lastActivityMs = SystemClock.uptimeMillis() }
+
+    private fun noteActivity() { lastActivityMs = SystemClock.uptimeMillis() }
+
+    private fun fillStarsAndEnterReward(auto: Boolean) {
+        stars = STARS_NEEDED
+        lastStarIndex = -1 // auto-fill: no per-star burst
+        enterReward()
+    }
+
+    /** Unlock the scrub bar for REWARD_MS, then bounce back to practice. */
+    private fun enterReward() {
+        scrubUnlocked = true
+        scrubUnlockTick += 1
+        rewardJob?.cancel()
+        rewardJob = scope.launch {
+            delay(REWARD_MS)
+            endReward()
+        }
+    }
+
+    /** Reward window over: black "time to practice" prompt spoken 3x, then jump into the film. */
+    private fun endReward() {
+        rewardJob = null
+        resetGameState()           // end any in-progress round; freeze cues while the prompt shows
+        scrubUnlocked = false
+        showPracticePrompt = true
+        player.pause()
+        audio.stopSpeaking()
+
+        var jumped = false
+        val doJump = {
+            if (!jumped) {
+                jumped = true
+                promptJob?.cancel(); promptJob = null
+                showPracticePrompt = false
+                jumpToPracticeStart()
+            }
+        }
+        audio.speakThrice("It's time to practice typing!") { doJump() }
+        // Safety net so we always jump even if TTS never signals done (e.g. backgrounded).
+        promptJob = scope.launch { delay(PROMPT_FALLBACK_MS); doJump() }
+    }
+
+    private fun jumpToPracticeStart() {
+        stars = 0
+        lastStarIndex = -1
+        noteActivity()
+        val target = pickJumpTarget()
+        if (target != null) {
+            gameSeekInProgress = true
+            activeCue = null
+            clearSubtitleDisplay()
+            player.seekTo(target)
+        }
+        player.play()
+    }
+
+    /**
+     * A random typeable cue that still has >= STARS_NEEDED opportunities at or after it (so three
+     * stars are always earnable). Null if the timeline isn't available or is too short — the caller
+     * then just resumes from where it is.
+     */
+    private fun pickJumpTarget(): Long? {
+        val cues = typeableCueStartsMs
+        if (cues.isEmpty()) return null
+        if (cues.size < STARS_NEEDED) return cues.first()
+        return cues[Random.nextInt(0, cues.size - STARS_NEEDED + 1)]
+    }
+
+    private fun startIdleMonitor() {
+        idleJob?.cancel()
+        lastActivityMs = SystemClock.uptimeMillis()
+        idleJob = scope.launch {
+            while (true) {
+                delay(IDLE_CHECK_MS)
+                if (stars < STARS_NEEDED &&
+                    SystemClock.uptimeMillis() - lastActivityMs >= IDLE_MS
+                ) {
+                    fillStarsAndEnterReward(auto = true)
+                    lastActivityMs = SystemClock.uptimeMillis() // don't immediately re-fire
+                }
+            }
+        }
+    }
+
+    private fun resetStarState() {
+        rewardJob?.cancel(); rewardJob = null
+        idleJob?.cancel(); idleJob = null
+        promptJob?.cancel(); promptJob = null
+        stars = 0
+        lastStarIndex = -1
+        scrubUnlocked = false
+        showPracticePrompt = false
+    }
+
     /**
      * User-initiated scrub, allowed at any time — including mid typing round. Scrubbing away from a
      * word abandons that round (ending the typing state and cutting off its speech) and resumes
      * playback from the new position, so the movie plays on from wherever the child lands.
      */
     fun seekTo(positionMs: Long) {
+        noteActivity()
         val wasTyping = isTyping
         if (wasTyping) {
             resetGameState()      // end the round: cancel hints/cooldown/replay, clear the frozen line
@@ -176,6 +322,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     fun release() {
         resetGameState()
+        resetStarState()
         player.release()
         audio.release()
     }
@@ -356,7 +503,19 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         cancelHints()
         isTyping = false
         rememberCompleted(current.text, current.cueStartMs, current.cueEndMs)
-        audio.playReward()
+        noteActivity()
+
+        if (stars < STARS_NEEDED) {
+            // Earn a star: twinkle (replaces the jingle while stars are still being earned) + burst.
+            stars += 1
+            lastStarIndex = stars - 1
+            starEarnTick += 1
+            audio.playTwinkle()
+            if (stars >= STARS_NEEDED) enterReward()
+        } else {
+            // Board already full (reward mode) — no star to earn, so the original jingle.
+            audio.playReward()
+        }
 
         resumeJob = scope.launch {
             delay(REWARD_PAUSE_MS)

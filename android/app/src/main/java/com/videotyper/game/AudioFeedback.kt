@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.SoundPool
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import com.videotyper.R
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +72,20 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
     /** Speak the "type this letter" hint for [letter]. */
     fun speakLetterHint(letter: Char) = speak(letterHintText(letter))
 
+    /** Speak [text] three times back-to-back, then invoke [onAllDone] (on the game scope). */
+    fun speakThrice(text: String, onAllDone: () -> Unit) {
+        val t = tts
+        if (t == null || !ttsReady) { onAllDone(); return }
+        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onError(utteranceId: String?) { if (utteranceId == LAST) scope.launch { onAllDone() } }
+            override fun onDone(utteranceId: String?) { if (utteranceId == LAST) scope.launch { onAllDone() } }
+        })
+        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vt_prompt_1")
+        t.speak(text, TextToSpeech.QUEUE_ADD, null, "vt_prompt_2")
+        t.speak(text, TextToSpeech.QUEUE_ADD, null, LAST)
+    }
+
     /** Cut off speech mid-utterance (used when the anti-mash gray state begins). */
     fun stopSpeaking() {
         if (ttsReady) tts?.stop()
@@ -98,32 +113,57 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
                 }
             }
 
-            val pcm = ShortArray(totalFrames) {
-                (mix[it].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
-            }
-
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
-                .setTransferMode(AudioTrack.MODE_STATIC)
-                .setBufferSizeInBytes(pcm.size * 2)
-                .build()
-            track.write(pcm, 0, pcm.size)
-            track.play()
-            delay(totalFrames * 1000L / sampleRate + 100)
-            track.release()
+            playPcm(mix, sampleRate)
         }
+    }
+
+    /** The "you earned a star" twinkle: a quick, bright ascending arpeggio with a shimmer harmonic. */
+    fun playTwinkle() {
+        scope.launch(Dispatchers.Default) {
+            val sampleRate = 22050
+            val notes = intArrayOf(1319, 1760, 2637)   // E6, A6, E7 — sparkly, rising
+            val noteFrames = sampleRate * 95 / 1000
+            val stepFrames = sampleRate * 70 / 1000     // slight overlap
+            val totalFrames = stepFrames * (notes.size - 1) + noteFrames
+            val mix = FloatArray(totalFrames)
+            notes.forEachIndexed { i, freq ->
+                val start = stepFrames * i
+                for (j in 0 until noteFrames) {
+                    val env = if (j < noteFrames * 0.05) j / (noteFrames * 0.05)
+                              else 1.0 - (j - noteFrames * 0.05) / (noteFrames * 0.95)  // fast decay = "ting"
+                    mix[start + j] += (0.20 * env * sin(2 * PI * freq * j / sampleRate)).toFloat()
+                    mix[start + j] += (0.07 * env * sin(2 * PI * freq * 2 * j / sampleRate)).toFloat()
+                }
+            }
+            playPcm(mix, sampleRate)
+        }
+    }
+
+    private suspend fun playPcm(mix: FloatArray, sampleRate: Int) {
+        val pcm = ShortArray(mix.size) {
+            (mix[it].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
+        }
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(pcm.size * 2)
+            .build()
+        track.write(pcm, 0, pcm.size)
+        track.play()
+        delay(mix.size * 1000L / sampleRate + 100)
+        track.release()
     }
 
     fun release() {
@@ -133,6 +173,8 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
     }
 
     companion object {
+        private const val LAST = "vt_prompt_last"
+
         /** The exact string spoken for a letter hint ("Type X"), with Roman-numeral letters spelled
          *  as homophones so TTS doesn't read them as numbers ("Type I" -> "type one"). */
         fun letterHintText(letter: Char): String = "Type ${spokenLetter(letter)}"

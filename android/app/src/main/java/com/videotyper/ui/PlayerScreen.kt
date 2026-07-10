@@ -5,6 +5,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -38,6 +41,9 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -54,6 +60,8 @@ import kotlinx.coroutines.delay
 
 private val HighlightYellow = Color(0xFFFFEB3B)
 private val FlashRed = Color(0xFFE53935)
+private val StarGold = Color(0xFFFFD740)
+private val StarDim = Color(0x55FFFFFF)
 
 // Vertical space kept for the subtitle strip + scrub bar + controls (everything between the video
 // and the keyboard), so the video can never grow large enough to push them off-screen on near-square
@@ -82,6 +90,14 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .grayscale(controller.isCoolingDown)
+            // Any tap/drag anywhere counts as activity (resets the idle-to-reward timer). Observed on
+            // the Initial pass without consuming, so it never steals input from the keyboard/slider.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    controller.onUserActivity()
+                }
+            }
     ) {
         val keyboardHeight = maxWidth * KEYBOARD_HEIGHT_FRACTION
         val videoHeight = minOf(maxWidth * 9f / 16f, maxHeight - BottomUiReserve - keyboardHeight)
@@ -99,9 +115,23 @@ fun PlayerScreen(
                 )
             }
             Spacer(Modifier.weight(1f))
-            SeekBar(controller)
+            StarScrubBand(controller)
             ControlsRow(controller, onMenuClick)
             CustomKeyboard(controller, Modifier.fillMaxWidth().height(keyboardHeight))
+        }
+
+        // "It's time to practice typing!" — black takeover while the prompt is spoken (video hidden).
+        if (controller.showPracticePrompt) {
+            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                Text(
+                    "It's time to practice typing!",
+                    color = HighlightYellow,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp),
+                )
+            }
         }
     }
 }
@@ -242,13 +272,18 @@ private fun AnnotatedString.Builder.withStyle(style: SpanStyle, block: Annotated
     addStyle(style, start, length)
 }
 
+/**
+ * The scrub bar's band, which is also the star board. The 3 star slots always sit here; the scrub
+ * bar only appears while it's unlocked (reward) and runs straight THROUGH the stars — so the stars
+ * visibly are the scrub bar's lock. A star earned pops a cosmic burst behind its slot; unlocking the
+ * bar pops a screen-width burst around it.
+ */
 @UnstableApi
 @Composable
-private fun SeekBar(controller: GameController) {
+private fun StarScrubBand(controller: GameController) {
     var durationMs by remember { mutableLongStateOf(0L) }
     var positionMs by remember { mutableLongStateOf(0L) }
     var dragValue by remember { mutableFloatStateOf(-1f) }
-
     LaunchedEffect(Unit) {
         while (true) {
             val d = controller.player.duration
@@ -258,22 +293,59 @@ private fun SeekBar(controller: GameController) {
         }
     }
 
-    // Just the scrub bar — no runtime label (not useful here, and it cost vertical space). Height
-    // is trimmed from the Material default so the bar stays compact. Scrubbing is allowed at any
-    // time, including during a typing round (which it abandons — see GameController.seekTo).
-    Slider(
-        value = if (dragValue >= 0f) dragValue
-        else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
-        onValueChange = { dragValue = it },
-        onValueChangeFinished = {
-            if (dragValue >= 0f && durationMs > 0) {
-                controller.seekTo((dragValue * durationMs).toLong())
+    val bursts = rememberCosmicBursts()
+    var bandW by remember { mutableFloatStateOf(0f) }
+    var bandH by remember { mutableFloatStateOf(0f) }
+
+    // Star-earned burst behind the just-filled slot (slots land at 1/4, 2/4, 3/4 of the width).
+    var prevStarTick by remember { mutableIntStateOf(controller.starEarnTick) }
+    LaunchedEffect(controller.starEarnTick) {
+        if (controller.starEarnTick != prevStarTick) {
+            prevStarTick = controller.starEarnTick
+            val i = controller.lastStarIndex
+            if (bandW > 0f && i in 0..2) bursts.fire((i + 1) / 4f * bandW, bandH / 2f, bandW * 0.05f)
+        }
+    }
+    // Screen-width burst around the scrub bar the moment it unlocks.
+    var prevUnlockTick by remember { mutableIntStateOf(controller.scrubUnlockTick) }
+    LaunchedEffect(controller.scrubUnlockTick) {
+        if (controller.scrubUnlockTick != prevUnlockTick) {
+            prevUnlockTick = controller.scrubUnlockTick
+            if (bandW > 0f) bursts.fire(bandW / 2f, bandH / 2f, bandW * 0.55f, particleCount = 64)
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .onSizeChanged { bandW = it.width.toFloat(); bandH = it.height.toFloat() }
+    ) {
+        Row(
+            Modifier.fillMaxWidth().align(Alignment.Center),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(3) { i ->
+                val filled = i < controller.stars
+                Text(if (filled) "★" else "☆", color = if (filled) StarGold else StarDim, fontSize = 26.sp)
             }
-            dragValue = -1f
-        },
-        enabled = controller.hasMedia,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(28.dp)
-    )
+        }
+        if (controller.scrubUnlocked) {
+            Slider(
+                value = if (dragValue >= 0f) dragValue
+                else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
+                onValueChange = { dragValue = it; controller.onUserActivity() },
+                onValueChangeFinished = {
+                    if (dragValue >= 0f && durationMs > 0) controller.seekTo((dragValue * durationMs).toLong())
+                    dragValue = -1f
+                },
+                enabled = controller.hasMedia,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).align(Alignment.Center),
+            )
+        }
+        CosmicCanvas(bursts, Modifier.fillMaxSize())
+    }
 }
 
 @UnstableApi
