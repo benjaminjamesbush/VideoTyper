@@ -4,6 +4,14 @@ VideoTyper is a typing game application that plays videos with subtitles, period
 
 Two implementations live in this repo: the original desktop app (`video_player.py`, Python + VLC + tkinter; see `DESKTOP.md`) and a native Android port (`android/`, Kotlin + Jetpack Compose + Media3/ExoPlayer — the maintained version, documented on the front-page `README.md`). The Android app is portrait-only, uses the system on-screen keyboard for typing, and plays videos from local storage, `smb://` network shares (jcifs-ng), or `http(s)://` URLs. Build note: the repo sits on a network share whose I/O is flaky under Gradle, so build output is routed to `C:\Users\Ben\.videotyper\` via `videotyper.localBuildDir` in `android/gradle.properties`, and builds should pass `--project-cache-dir C:\Users\Ben\.videotyper\gradle-cache`.
 
+## Phone / adb safety (CRITICAL — protects the OLED screen)
+
+The Android app is tested on Apollo's physical phone over wireless adb, and its screen is OLED (susceptible to burn-in from a static image left on for a long time).
+
+- **NEVER leave `svc power stayon true` set.** If you run `adb shell svc power stayon true` to keep the screen on during screen recording or screenshots, you MUST revert it with `adb shell svc power stayon false` before ending the turn. That command sets the global `stay_on_while_plugged_in` flag, which keeps the WHOLE device's screen on while charging — it overrides the app entirely and has already caused the screen to stay lit for hours (burn-in risk). Prefer `input keyevent KEYCODE_WAKEUP` (a one-shot wake) over `stayon` when you only need the screen on briefly.
+- **Verify before finishing:** `adb shell settings get global stay_on_while_plugged_in` must return `0`.
+- The app's own screen-wake is deliberately scoped: `FLAG_KEEP_SCREEN_ON` is held ONLY while the movie is actually playing (`isPlaying`), and cleared when paused (including every typing round, where the movie is paused) or on leaving the player. Do not reintroduce an unconditional keep-screen-on.
+
 ## Technology Decision
 
 After discussing requirements (handling large video files, MKV support, embedded subtitles), the recommended approach is:
