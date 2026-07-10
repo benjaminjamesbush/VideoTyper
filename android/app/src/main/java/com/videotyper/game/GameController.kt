@@ -1,6 +1,7 @@
 package com.videotyper.game
 
 import android.content.Context
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
@@ -30,6 +31,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.log10
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 /**
@@ -70,9 +73,16 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val SUBTITLE_INDEX_WAIT_MS = 8_000L         // await the async cue-timeline pull before a jump
         private const val SUBTITLE_INDEX_LOAD_TIMEOUT_MS = 45_000L // give up loading a video's timeline after this
         private const val TAG = "VTStar"
+
+        // Movie volume boost: the movies are mastered quiet vs the game SFX, so we amplify their audio
+        // above unity via a LoudnessEnhancer. Adjustable 100%..500% (1x..5x) by swiping the video.
+        private const val VOLUME_MIN = 100f
+        private const val VOLUME_MAX = 500f
+        private const val VOLUME_DEFAULT = 200
     }
 
     private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("videotyper", Context.MODE_PRIVATE)
 
     val audio = AudioFeedback(context, scope)
 
@@ -118,6 +128,11 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     // Unlock celebrations are shuffled once per app launch, then cycled through on each unlock.
     private val celebrationOrder = (0 until CELEBRATION_COUNT).toList().shuffled()
     private var celebrationCursor = 0
+
+    // Movie volume boost, adjustable by swiping the video (100%..500%, persisted across sessions).
+    var volumePercent by mutableStateOf(prefs.getInt("volume_percent", VOLUME_DEFAULT)); private set
+    private var volumeGainPercent = volumePercent.toFloat()
+    private var loudnessEnhancer: LoudnessEnhancer? = null
 
     // ---- engine state ----
     private data class ActiveCue(val text: String, val startMs: Long, val word: String?, val alreadyDone: Boolean)
@@ -384,6 +399,8 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     fun release() {
         resetGameState()
         resetStarState()
+        loudnessEnhancer?.release()
+        loudnessEnhancer = null
         player.release()
         audio.release()
     }
@@ -402,6 +419,37 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     override fun onIsPlayingChanged(playing: Boolean) {
         isPlaying = playing
     }
+
+    override fun onAudioSessionIdChanged(audioSessionId: Int) {
+        // (Re)attach the loudness booster to the player's current audio session and apply the gain.
+        loudnessEnhancer?.release()
+        loudnessEnhancer = null
+        if (audioSessionId == C.AUDIO_SESSION_ID_UNSET) return
+        try {
+            loudnessEnhancer = LoudnessEnhancer(audioSessionId).apply {
+                setTargetGain(gainMillibels(volumeGainPercent))
+                enabled = true
+            }
+        } catch (_: Exception) {
+            // Some devices/sessions can reject the effect; playback just falls back to unity gain.
+        }
+    }
+
+    /** Nudge the movie volume by [deltaPercent] (from a video swipe); clamps to 100%..500%. */
+    fun nudgeVolume(deltaPercent: Float) {
+        volumeGainPercent = (volumeGainPercent + deltaPercent).coerceIn(VOLUME_MIN, VOLUME_MAX)
+        volumePercent = volumeGainPercent.roundToInt()
+        try { loudnessEnhancer?.setTargetGain(gainMillibels(volumeGainPercent)) } catch (_: Exception) {}
+    }
+
+    /** Persist the volume once a swipe finishes (kept out of the per-frame drag path). */
+    fun commitVolume() {
+        prefs.edit().putInt("volume_percent", volumePercent).apply()
+    }
+
+    /** Convert a percent gain (100 = unity) to LoudnessEnhancer target gain in millibels. */
+    private fun gainMillibels(percent: Float): Int =
+        (2000.0 * log10((percent / 100.0).coerceAtLeast(0.01))).roundToInt()
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) {

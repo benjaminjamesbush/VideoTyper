@@ -1,14 +1,17 @@
 package com.videotyper.ui
 
+import android.app.Activity
 import android.graphics.ColorMatrixColorFilter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -52,6 +56,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -101,6 +106,19 @@ fun PlayerScreen(
     //
     // Anti-mash cooldown: the whole UI (video + keyboard included) drains to grayscale — still fully
     // visible, just colorless — with no sound, message, or animation while gray.
+
+    // Keep the screen awake only while the movie is actually playing, so the phone can sleep normally
+    // when paused/idle (touch input keeps it awake during a typing round). Cleared on leaving the player.
+    val activity = LocalContext.current as? Activity
+    LaunchedEffect(controller.isPlaying, activity) {
+        val w = activity?.window ?: return@LaunchedEffect
+        if (controller.isPlaying) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else w.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+    DisposableEffect(activity) {
+        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -127,14 +145,25 @@ fun PlayerScreen(
         Column(Modifier.fillMaxSize()) {
             VideoSurface(
                 controller,
-                Modifier.fillMaxWidth().height(videoHeight).pointerInput(Unit) {
-                    detectTapGestures {
-                        val now = System.currentTimeMillis()
-                        videoTaps.add(now)
-                        videoTaps.removeAll { now - it > 3000 }
-                        if (videoTaps.size >= 5) { videoTaps.clear(); controller.debugForcePractice() }
+                Modifier.fillMaxWidth().height(videoHeight)
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            val now = System.currentTimeMillis()
+                            videoTaps.add(now)
+                            videoTaps.removeAll { now - it > 3000 }
+                            if (videoTaps.size >= 5) { videoTaps.clear(); controller.debugForcePractice() }
+                        }
                     }
-                }
+                    // Swipe up/down over the video to raise/lower the movie volume. One full-height
+                    // swipe = 25% (so the 100%..500% range takes several deliberate swipes).
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragEnd = { controller.commitVolume() },
+                            onVerticalDrag = { _, dragAmount ->
+                                if (size.height > 0) controller.nudgeVolume(-dragAmount / size.height * 25f)
+                            }
+                        )
+                    }
             )
             SubtitleStrip(controller)
             controller.statusMessage?.let {
@@ -162,6 +191,31 @@ fun PlayerScreen(
                 band = Band(bb.left, bb.right, bb.center.y, bb.height * 0.13f),
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+
+        // Transient volume readout while swiping the video to adjust the movie volume.
+        var showVolume by remember { mutableStateOf(false) }
+        var prevVol by remember { mutableIntStateOf(controller.volumePercent) }
+        LaunchedEffect(controller.volumePercent) {
+            if (controller.volumePercent != prevVol) {
+                prevVol = controller.volumePercent
+                showVolume = true
+                delay(900)
+                showVolume = false
+            }
+        }
+        if (showVolume) {
+            Box(Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.TopCenter) {
+                Row(
+                    modifier = Modifier.clip(CircleShape).background(Color(0xCC000000))
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("🔊", fontSize = 22.sp)
+                    Text("${controller.volumePercent}%", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
 
         // Loading a freshly opened video: black takeover with a spinner until its cue timeline is
