@@ -4,6 +4,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -43,6 +44,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -60,6 +63,8 @@ import androidx.media3.ui.PlayerView
 import com.videotyper.R
 import com.videotyper.game.GameController
 import kotlinx.coroutines.delay
+import kotlin.math.cos
+import kotlin.math.sin
 
 private val HighlightYellow = Color(0xFFFFEB3B)
 private val FlashRed = Color(0xFFE53935)
@@ -357,18 +362,34 @@ private fun StarScrubBand(controller: GameController) {
         }
         // Bursts behind the stars, over the bar.
         CosmicCanvas(bursts, Modifier.fillMaxSize())
-        // Star slots ON TOP of the scrub bar, 2x size.
-        Row(
-            Modifier.fillMaxWidth().align(Alignment.Center),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            repeat(3) { i ->
-                val filled = i < controller.stars
-                Text(if (filled) "★" else "☆", color = if (filled) StarGold else StarDim, fontSize = 52.sp)
+        // Star slots drawn ON TOP, centered exactly on the band's mid-line (= the scrub track line),
+        // so the bar passes through each star's center. Radius is bounded so nothing clips.
+        Canvas(Modifier.fillMaxSize()) {
+            val cy = size.height / 2f
+            val outerR = size.height * 0.44f   // top point at 0.06*h, bottom points at ~0.36*h -> fits
+            for (i in 0..2) {
+                val cx = (i + 1) / 4f * size.width
+                val path = starPath(cx, cy, outerR)
+                if (i < controller.stars) drawPath(path, StarGold)
+                else drawPath(path, StarDim, style = Stroke(width = outerR * 0.16f))
             }
         }
     }
+}
+
+/** A 5-point star path centered exactly at (cx, cy) with the given outer radius (top point up). */
+private fun starPath(cx: Float, cy: Float, outerR: Float): Path {
+    val innerR = outerR * 0.42f
+    val p = Path()
+    for (k in 0 until 10) {
+        val r = if (k % 2 == 0) outerR else innerR
+        val a = Math.toRadians(-90.0 + k * 36.0)
+        val x = cx + (r * cos(a)).toFloat()
+        val y = cy + (r * sin(a)).toFloat()
+        if (k == 0) p.moveTo(x, y) else p.lineTo(x, y)
+    }
+    p.close()
+    return p
 }
 
 @UnstableApi

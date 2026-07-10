@@ -117,25 +117,56 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    /** The "you earned a star" twinkle: a quick, bright ascending arpeggio with a shimmer harmonic. */
+    /** The "you earned a star" twinkle: a 5-note ascending run capped with a bright major chord. */
     fun playTwinkle() {
         scope.launch(Dispatchers.Default) {
-            val sampleRate = 22050
-            val notes = intArrayOf(1319, 1760, 2637)   // E6, A6, E7 — sparkly, rising
-            val noteFrames = sampleRate * 95 / 1000
-            val stepFrames = sampleRate * 70 / 1000     // slight overlap
-            val totalFrames = stepFrames * (notes.size - 1) + noteFrames
-            val mix = FloatArray(totalFrames)
-            notes.forEachIndexed { i, freq ->
-                val start = stepFrames * i
+            val sr = 22050
+            val notes = intArrayOf(1047, 1319, 1568, 2093, 2637)   // C6 E6 G6 C7 E7 — rising
+            val noteFrames = sr * 80 / 1000
+            val stepFrames = sr * 62 / 1000
+            val runEnd = stepFrames * (notes.size - 1) + noteFrames
+            val chord = intArrayOf(2093, 2637, 3136)               // C7 E7 G7 — capping chord
+            val chordFrames = sr * 450 / 1000
+            val mix = FloatArray(runEnd + chordFrames)
+            notes.forEachIndexed { i, f ->
+                val s = stepFrames * i
                 for (j in 0 until noteFrames) {
                     val env = if (j < noteFrames * 0.05) j / (noteFrames * 0.05)
-                              else 1.0 - (j - noteFrames * 0.05) / (noteFrames * 0.95)  // fast decay = "ting"
-                    mix[start + j] += (0.20 * env * sin(2 * PI * freq * j / sampleRate)).toFloat()
-                    mix[start + j] += (0.07 * env * sin(2 * PI * freq * 2 * j / sampleRate)).toFloat()
+                              else 1.0 - (j - noteFrames * 0.05) / (noteFrames * 0.95)
+                    mix[s + j] += (0.15 * env * sin(2 * PI * f * j / sr)).toFloat()
+                    mix[s + j] += (0.05 * env * sin(2 * PI * f * 2 * j / sr)).toFloat()
                 }
             }
-            playPcm(mix, sampleRate)
+            for (j in 0 until chordFrames) {
+                val env = if (j < chordFrames * 0.02) j / (chordFrames * 0.02) else 1.0 - j.toDouble() / chordFrames
+                for (f in chord) {
+                    mix[runEnd + j] += (0.12 * env * sin(2 * PI * f * j / sr)).toFloat()
+                    mix[runEnd + j] += (0.04 * env * sin(2 * PI * f * 2 * j / sr)).toFloat()
+                }
+            }
+            playPcm(mix, sr)
+        }
+    }
+
+    /** Power-up for unlocking the scrub bar: a rising sweep into a big triumphant chord. */
+    fun playUnlock() {
+        scope.launch(Dispatchers.Default) {
+            val sr = 22050
+            val sweepFrames = sr * 300 / 1000
+            val chordFrames = sr * 650 / 1000
+            val mix = FloatArray(sweepFrames + chordFrames)
+            for (j in 0 until sweepFrames) {
+                val t = j.toDouble() / sweepFrames
+                val f = 400 + 1500 * t                              // glide up
+                val env = if (t < 0.1) t / 0.1 else 1.0
+                mix[j] += (0.18 * env * sin(2 * PI * f * j / sr)).toFloat()
+            }
+            val chord = intArrayOf(523, 659, 784, 1047, 1319)       // C5 E5 G5 C6 E6 — spread major
+            for (j in 0 until chordFrames) {
+                val env = if (j < chordFrames * 0.03) j / (chordFrames * 0.03) else 1.0 - j.toDouble() / chordFrames
+                for (f in chord) mix[sweepFrames + j] += (0.10 * env * sin(2 * PI * f * j / sr)).toFloat()
+            }
+            playPcm(mix, sr)
         }
     }
 

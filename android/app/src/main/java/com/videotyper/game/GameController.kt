@@ -63,6 +63,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val IDLE_MS = 5 * 60 * 1000L        // no input this long -> auto-fill to 3 stars
         private const val IDLE_CHECK_MS = 15_000L         // how often the idle monitor checks
         private const val PROMPT_FALLBACK_MS = 9_000L     // jump anyway if the spoken prompt never signals done
+        private const val TWINKLE_MS = 820L               // 3rd-star twinkle length; unlock lands after it
     }
 
     private val appContext = context.applicationContext
@@ -219,6 +220,12 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private fun enterReward() {
         scrubUnlocked = true
         scrubUnlockTick += 1
+        audio.playUnlock()
+        restartRewardTimer()
+    }
+
+    /** (Re)start the 5-minute countdown to the practice prompt. */
+    private fun restartRewardTimer() {
         rewardJob?.cancel()
         rewardJob = scope.launch {
             delay(REWARD_MS)
@@ -511,10 +518,13 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
             lastStarIndex = stars - 1
             starEarnTick += 1
             audio.playTwinkle()
-            if (stars >= STARS_NEEDED) enterReward()
+            // Third star: let its twinkle ring out first, THEN unlock (sound + burst after it).
+            if (stars >= STARS_NEEDED) scope.launch { delay(TWINKLE_MS); if (stars >= STARS_NEEDED) enterReward() }
         } else {
-            // Board already full (reward mode) — no star to earn, so the original jingle.
+            // Board already full (reward mode): no star to earn — instead, completing a word resets
+            // the 5-minute countdown to practice, so continued typing keeps the scrub time alive.
             audio.playReward()
+            if (scrubUnlocked) restartRewardTimer()
         }
 
         resumeJob = scope.launch {
