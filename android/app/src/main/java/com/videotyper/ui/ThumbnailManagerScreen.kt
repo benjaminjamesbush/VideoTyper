@@ -1,9 +1,11 @@
 package com.videotyper.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,19 +26,29 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +81,20 @@ fun ThumbnailManagerScreen(video: RecentVideo, onDone: () -> Unit) {
     val candidates by produceState<List<PosterSearch.Candidate>?>(initialValue = null, key1 = searchTerm) {
         value = null
         value = PosterSearch.search(searchTerm, preferTv = preferTv, tmdbKey = tmdbKey)
+    }
+
+    // Frame chooser: total duration + the scrubbed position + a live (debounced) preview of it.
+    val currentChoice = remember { store.choiceFor(video.uri) }
+    val durationMs by produceState(0L, video.uri) { value = ThumbnailLoader.durationMs(context, video.uri) }
+    var frameMs by remember {
+        mutableLongStateOf((currentChoice as? ThumbnailChoice.Frame)?.timeMs ?: ThumbnailChoice.DEFAULT_FRAME_MS)
+    }
+    var cropBias by remember {
+        mutableFloatStateOf((currentChoice as? ThumbnailChoice.Frame)?.cropBias ?: 0.5f)
+    }
+    val framePreview by produceState<Bitmap?>(initialValue = null, key1 = frameMs) {
+        delay(220) // debounce: only decode once the slider settles (rapid scrubbing cancels this)
+        value = ThumbnailLoader.decodeFrameAt(context, video.uri, frameMs)
     }
 
     fun choose(choice: ThumbnailChoice) {
@@ -112,8 +138,28 @@ fun ThumbnailManagerScreen(video: RecentVideo, onDone: () -> Unit) {
 
         Spacer(Modifier.height(12.dp))
 
+        // Frame chooser: scrub to any moment (the first frame is often a bad poster), then drag the
+        // highlighted box to choose which part of the wide frame becomes the 2:3 poster.
+        Text("Video frame — pick the moment", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        FrameCropSelector(framePreview, cropBias) { cropBias = it }
+        Text(
+            "Drag the box to choose the part of the frame to keep.",
+            color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp)
+        )
+        Slider(
+            value = frameMs.coerceIn(0L, durationMs.coerceAtLeast(0L)).toFloat(),
+            onValueChange = { frameMs = it.toLong() },
+            valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+            enabled = durationMs > 0L
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatMs(frameMs), color = Color.Gray, fontSize = 12.sp)
+            Text(if (durationMs > 0L) formatMs(durationMs) else "…", color = Color.Gray, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { choose(ThumbnailChoice.Frame) }) { Text("Use video frame") }
+            Button(onClick = { choose(ThumbnailChoice.Frame(frameMs, cropBias)) }) { Text("Use this frame") }
             OutlinedButton(onClick = { choose(ThumbnailChoice.Auto) }) { Text("Automatic") }
         }
 
@@ -143,6 +189,64 @@ fun ThumbnailManagerScreen(video: RecentVideo, onDone: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Shows the full decoded frame with a draggable 2:3 crop window (the rest dimmed), so the user can
+ * pan which slice of a wide frame becomes the portrait poster. [cropBias] 0..1 is the window's
+ * position along the pannable axis; dragging horizontally reports a new bias.
+ */
+@Composable
+private fun FrameCropSelector(bmp: Bitmap?, cropBias: Float, onBiasChange: (Float) -> Unit) {
+    if (bmp == null) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(PanelGray),
+            contentAlignment = Alignment.Center
+        ) { CircularProgressIndicator() }
+        return
+    }
+    val frameAspect = (bmp.width.toFloat() / bmp.height.coerceAtLeast(1)).coerceAtLeast(0.1f)
+    val windowWFrac = ((2f / 3f) / frameAspect).coerceIn(0.1f, 1f) // 2:3 window width as a fraction of the frame width
+    val panRange = 1f - windowWFrac
+    val biasState = rememberUpdatedState(cropBias)
+    var boxW by remember { mutableFloatStateOf(1f) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(frameAspect)
+            .clip(RoundedCornerShape(8.dp))
+            .background(PanelGray)
+            .onSizeChanged { boxW = it.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(panRange) {
+                if (panRange > 0f) detectDragGestures { _, drag ->
+                    onBiasChange((biasState.value + drag.x / (boxW * panRange)).coerceIn(0f, 1f))
+                }
+            }
+    ) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = "Selected frame",
+            contentScale = ContentScale.FillWidth,
+            modifier = Modifier.fillMaxSize()
+        )
+        Canvas(Modifier.fillMaxSize()) {
+            val leftPx = size.width * (biasState.value.coerceIn(0f, 1f) * panRange)
+            val wPx = size.width * windowWFrac
+            val dim = Color(0x99000000)
+            drawRect(dim, size = Size(leftPx, size.height))
+            drawRect(dim, topLeft = Offset(leftPx + wPx, 0f), size = Size((size.width - leftPx - wPx).coerceAtLeast(0f), size.height))
+            drawRect(Color(0xFFFFD54F), topLeft = Offset(leftPx, 0f), size = Size(wPx, size.height), style = Stroke(width = 3.dp.toPx()))
+        }
+    }
+}
+
+/** mm:ss (or h:mm:ss for long videos) for the scrub position/duration labels. */
+private fun formatMs(ms: Long): String {
+    val totalSec = (ms / 1000).coerceAtLeast(0L)
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 @Composable

@@ -10,8 +10,17 @@ import org.json.JSONObject
  */
 sealed interface ThumbnailChoice {
     data object Auto : ThumbnailChoice
-    data object Frame : ThumbnailChoice
+    /**
+     * A decoded video frame at [timeMs] (the user picks which one; the first frame is often bad),
+     * cropped to the poster's 2:3 shape at horizontal bias [cropBias] (0 = left … 0.5 = center …
+     * 1 = right), so the user can also choose which part of a wide frame to keep.
+     */
+    data class Frame(val timeMs: Long = DEFAULT_FRAME_MS, val cropBias: Float = 0.5f) : ThumbnailChoice
     data class Poster(val artUrl: String) : ThumbnailChoice
+
+    companion object {
+        const val DEFAULT_FRAME_MS = 3_000L
+    }
 }
 
 /** Persists per-video thumbnail overrides (video URI -> choice) in SharedPreferences. */
@@ -23,7 +32,10 @@ class ThumbnailStore(context: Context) {
         return try {
             val o = JSONObject(raw).optJSONObject(uri) ?: return ThumbnailChoice.Auto
             when (o.getString("type")) {
-                "frame" -> ThumbnailChoice.Frame
+                "frame" -> ThumbnailChoice.Frame(
+                    o.optLong("timeMs", ThumbnailChoice.DEFAULT_FRAME_MS),
+                    o.optDouble("cropBias", 0.5).toFloat()
+                )
                 "poster" -> ThumbnailChoice.Poster(o.getString("artUrl"))
                 else -> ThumbnailChoice.Auto
             }
@@ -36,7 +48,9 @@ class ThumbnailStore(context: Context) {
         val root = readObj(KEY)
         when (choice) {
             ThumbnailChoice.Auto -> root.remove(uri)
-            ThumbnailChoice.Frame -> root.put(uri, JSONObject().put("type", "frame"))
+            is ThumbnailChoice.Frame ->
+                root.put(uri, JSONObject().put("type", "frame").put("timeMs", choice.timeMs)
+                    .put("cropBias", choice.cropBias.toDouble()))
             is ThumbnailChoice.Poster ->
                 root.put(uri, JSONObject().put("type", "poster").put("artUrl", choice.artUrl))
         }
