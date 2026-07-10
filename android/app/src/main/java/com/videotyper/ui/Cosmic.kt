@@ -24,20 +24,22 @@ import kotlin.random.Random
  * cosmic palette). Used for the star-earned bursts and the screen-width burst around the scrub bar
  * when it unlocks. Fire a burst via [CosmicBursts.fire]; draw with [CosmicCanvas] over the content.
  */
-private const val BURST_DURATION_NS = 800_000_000L
 private val Palette = listOf(
     Color(0xFF7C4DFF), Color(0xFF448AFF), Color(0xFF18FFFF),
     Color(0xFFE040FB), Color(0xFFFF4081), Color(0xFFFFD740), Color(0xFFFFFFFF),
 )
 
 internal class CosmicParticle(val angle: Float, val speed: Float, val size: Float, val color: Color, val streak: Boolean)
-internal class CosmicBurst(val cx: Float, val cy: Float, val baseR: Float, val startNanos: Long, val particles: List<CosmicParticle>)
+internal class CosmicBurst(
+    val cx: Float, val cy: Float, val baseR: Float,
+    val startNanos: Long, val durationNs: Long, val particles: List<CosmicParticle>,
+)
 
 class CosmicBursts {
     internal val list = mutableStateListOf<CosmicBurst>()
 
-    /** Fire a burst centered at (cx,cy) px; baseR sets its scale; particleCount its density. */
-    fun fire(cx: Float, cy: Float, baseR: Float, particleCount: Int = 34) {
+    /** Fire a burst at (cx,cy) px; baseR sets its scale, particleCount its density, durationMs its length. */
+    fun fire(cx: Float, cy: Float, baseR: Float, particleCount: Int = 34, durationMs: Long = 800) {
         val twoPi = 2f * Math.PI.toFloat()
         val ps = ArrayList<CosmicParticle>(particleCount)
         for (i in 0 until particleCount) {
@@ -46,7 +48,7 @@ class CosmicBursts {
             val size = 0.04f + Random.nextFloat() * 0.11f
             ps.add(CosmicParticle(angle, speed, size, Palette[Random.nextInt(Palette.size)], Random.nextFloat() < 0.35f))
         }
-        list.add(CosmicBurst(cx, cy, baseR, System.nanoTime(), ps))
+        list.add(CosmicBurst(cx, cy, baseR, System.nanoTime(), durationMs * 1_000_000L, ps))
     }
 }
 
@@ -59,14 +61,14 @@ fun CosmicCanvas(bursts: CosmicBursts, modifier: Modifier = Modifier) {
     LaunchedEffect(bursts.list.isNotEmpty()) {
         while (bursts.list.isNotEmpty()) {
             withFrameNanos { frameNanos = it }
-            bursts.list.removeAll { frameNanos - it.startNanos > BURST_DURATION_NS }
+            bursts.list.removeAll { frameNanos - it.startNanos > it.durationNs }
         }
     }
     Canvas(modifier) { for (b in bursts.list) drawBurst(b, frameNanos) }
 }
 
 private fun DrawScope.drawBurst(b: CosmicBurst, frameNanos: Long) {
-    val t = ((frameNanos - b.startNanos).toFloat() / BURST_DURATION_NS).coerceIn(0f, 1f)
+    val t = ((frameNanos - b.startNanos).toFloat() / b.durationNs.toFloat()).coerceIn(0f, 1f)
     if (t >= 1f) return
     val ease = 1f - (1f - t) * (1f - t) * (1f - t)
     val c = Offset(b.cx, b.cy)

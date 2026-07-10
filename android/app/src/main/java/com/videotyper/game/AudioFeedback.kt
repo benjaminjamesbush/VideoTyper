@@ -148,23 +148,37 @@ class AudioFeedback(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    /** Power-up for unlocking the scrub bar: a rising sweep into a big triumphant chord. */
+    /**
+     * Power-up for unlocking the scrub bar: a rising sweep into a big sustained triumphant chord with
+     * a sparkling arpeggio tail — a ~2.6s fanfare to match the fireworks celebration.
+     */
     fun playUnlock() {
         scope.launch(Dispatchers.Default) {
             val sr = 22050
-            val sweepFrames = sr * 300 / 1000
-            val chordFrames = sr * 650 / 1000
+            val sweepFrames = sr * 400 / 1000
+            val chordFrames = sr * 2200 / 1000
             val mix = FloatArray(sweepFrames + chordFrames)
             for (j in 0 until sweepFrames) {
                 val t = j.toDouble() / sweepFrames
-                val f = 400 + 1500 * t                              // glide up
+                val f = 350 + 1600 * t                                   // glide up
                 val env = if (t < 0.1) t / 0.1 else 1.0
-                mix[j] += (0.18 * env * sin(2 * PI * f * j / sr)).toFloat()
+                mix[j] += (0.16 * env * sin(2 * PI * f * j / sr)).toFloat()
             }
-            val chord = intArrayOf(523, 659, 784, 1047, 1319)       // C5 E5 G5 C6 E6 — spread major
+            val chord = intArrayOf(523, 659, 784, 1047, 1319)           // C5 E5 G5 C6 E6 — spread major
             for (j in 0 until chordFrames) {
-                val env = if (j < chordFrames * 0.03) j / (chordFrames * 0.03) else 1.0 - j.toDouble() / chordFrames
-                for (f in chord) mix[sweepFrames + j] += (0.10 * env * sin(2 * PI * f * j / sr)).toFloat()
+                val env = if (j < chordFrames * 0.02) j / (chordFrames * 0.02) else 1.0 - j.toDouble() / chordFrames
+                for (f in chord) mix[sweepFrames + j] += (0.085 * env * sin(2 * PI * f * j / sr)).toFloat()
+            }
+            // Sparkle arpeggio riding over the chord.
+            val sparkle = intArrayOf(1568, 2093, 2637, 3136, 2637, 2093) // G6 C7 E7 G7 E7 C7
+            val noteFrames = sr * 130 / 1000
+            sparkle.forEachIndexed { i, f ->
+                val s = sweepFrames + sr * 300 / 1000 + i * (sr * 200 / 1000)
+                for (j in 0 until noteFrames) {
+                    if (s + j >= mix.size) break
+                    val env = if (j < noteFrames * 0.05) j / (noteFrames * 0.05) else 1.0 - j.toDouble() / noteFrames
+                    mix[s + j] += (0.10 * env * sin(2 * PI * f * j / sr)).toFloat()
+                }
             }
             playPcm(mix, sr)
         }

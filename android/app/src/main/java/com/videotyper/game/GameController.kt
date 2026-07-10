@@ -3,6 +3,7 @@ package com.videotyper.game
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
 
 /**
@@ -64,6 +66,9 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         private const val IDLE_CHECK_MS = 15_000L         // how often the idle monitor checks
         private const val PROMPT_FALLBACK_MS = 9_000L     // jump anyway if the spoken prompt never signals done
         private const val TWINKLE_MS = 820L               // 3rd-star twinkle length; unlock lands after it
+        private const val SUBTITLE_INDEX_WAIT_MS = 8_000L         // await the async cue-timeline pull before a jump
+        private const val SUBTITLE_INDEX_LOAD_TIMEOUT_MS = 45_000L // give up loading a video's timeline after this
+        private const val TAG = "VTStar"
     }
 
     private val appContext = context.applicationContext
@@ -98,6 +103,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     var statusMessage by mutableStateOf<String?>(null); private set
     var hasMedia by mutableStateOf(false); private set
     var isCoolingDown by mutableStateOf(false); private set
+    var isLoading by mutableStateOf(false); private set   // preparing a freshly opened video (extracting its cue timeline)
 
     // ---- star / token board ----
     var stars by mutableStateOf(0); private set                 // 0..STARS_NEEDED
@@ -122,6 +128,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var cooldownLenMs = 0L
     private var wrongStreak = 0
     private var suspended = false // app not in the foreground (screen off / navigated away)
+    private var openToken = 0     // ++ on every open/stop/leave; a stale extraction coroutine checks it before autoplaying
 
     // Star board / reward timers + the subtitle timeline used to pick a safe practice jump.
     private var rewardJob: Job? = null
@@ -129,6 +136,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var promptJob: Job? = null
     private var lastActivityMs = 0L
     private var typeableCueStartsMs: List<Long> = emptyList()
+    private var subtitleIndexJob: Job? = null
 
     // ---------------------------------------------------------------- media control
 
@@ -137,29 +145,36 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     private var subtitleCheck: ((Boolean) -> Unit)? = null
 
     fun openUri(uri: Uri, onSubtitleCheck: ((Boolean) -> Unit)? = null) {
+        val token = ++openToken
         resetGameState()
         resetStarState()
         completedCues.clear()
         statusMessage = null
         subtitleCheck = onSubtitleCheck
         typeableCueStartsMs = emptyList()
+        isLoading = true
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
-        player.play()
         hasMedia = true
 
-        // Pull the full typeable-cue timeline once (off the main thread) so practice jumps can land
-        // on a line that still has >= 3 opportunities after it.
-        scope.launch {
-            val idx = withContext(Dispatchers.IO) {
-                SubtitleIndex.typeableCueStartsMs(appContext, uri.toString())
-            }
+        // Pull the full typeable-cue timeline BEFORE playback (off the main thread), showing a loading
+        // screen meanwhile, so: (a) practice jumps always have the timeline, and (b) the child never
+        // starts mid-load. Only once it's ready do we start the movie and the opening scrub reward.
+        subtitleIndexJob = scope.launch {
+            val idx = withTimeoutOrNull(SUBTITLE_INDEX_LOAD_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) {
+                    SubtitleIndex.typeableCueStartsMs(appContext, uri.toString())
+                }
+            } ?: emptyList()
+            if (token != openToken) return@launch  // superseded by another open, or the video was rejected/left
             typeableCueStartsMs = idx
+            Log.d(TAG, "subtitle index loaded: ${idx.size} typeable cues")
+            isLoading = false
+            player.play()
+            // A freshly opened video starts with a full board -> the scrub-bar reward, then practice.
+            fillStarsAndEnterReward(auto = true)
+            startIdleMonitor()
         }
-
-        // A freshly opened video starts with a full board -> the scrub-bar reward, then practice.
-        fillStarsAndEnterReward(auto = true)
-        startIdleMonitor()
     }
 
     fun playPause() {
@@ -168,6 +183,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     }
 
     fun stop() {
+        openToken++          // invalidate any in-flight open so its extraction won't autoplay
         resetGameState()
         resetStarState()
         player.pause()
@@ -176,6 +192,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
 
     /** Leave gameplay for the menu: end any typing round and pause. */
     fun leaveGame() {
+        openToken++          // invalidate any in-flight open so its extraction won't autoplay
         resetGameState()
         resetStarState()
         player.pause()
@@ -239,6 +256,14 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
     /** Reward window over: black "time to practice" prompt spoken 3x, then jump into the film. */
     private fun endReward() {
         rewardJob = null
+        // If the child is already mid typing round, they're already practicing — don't interrupt with
+        // the announcement or a jump. Just silently end the reward (empty the board, relock the bar).
+        if (isTyping) {
+            scrubUnlocked = false
+            stars = 0
+            lastStarIndex = -1
+            return
+        }
         resetGameState()           // end any in-progress round; freeze cues while the prompt shows
         scrubUnlocked = false
         showPracticePrompt = true
@@ -263,14 +288,23 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         stars = 0
         lastStarIndex = -1
         noteActivity()
-        val target = pickJumpTarget()
-        if (target != null) {
-            gameSeekInProgress = true
-            activeCue = null
-            clearSubtitleDisplay()
-            player.seekTo(target)
+        scope.launch {
+            // The cue timeline loads asynchronously after a video opens; right after opening it may
+            // not be ready yet. Wait for it (bounded) so the jump lands on a real subtitle line
+            // instead of silently no-op'ing and just playing on from wherever we were.
+            if (typeableCueStartsMs.isEmpty()) {
+                withTimeoutOrNull(SUBTITLE_INDEX_WAIT_MS) { subtitleIndexJob?.join() }
+            }
+            val target = pickJumpTarget()
+            Log.d(TAG, "practice jump: index=${typeableCueStartsMs.size} target=$target")
+            if (target != null) {
+                gameSeekInProgress = true
+                activeCue = null
+                clearSubtitleDisplay()
+                player.seekTo(target)
+            }
+            player.play()
         }
-        player.play()
     }
 
     /**
@@ -611,6 +645,7 @@ class GameController(context: Context, private val scope: CoroutineScope) : Play
         round = null
         activeCue = null
         isTyping = false
+        isLoading = false
         gameSeekInProgress = false
         clearSubtitleDisplay()
     }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -66,6 +67,7 @@ import com.videotyper.game.GameController
 import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.random.Random
 
 private val HighlightYellow = Color(0xFFFFEB3B)
 private val FlashRed = Color(0xFFE53935)
@@ -142,6 +144,21 @@ fun PlayerScreen(
             StarScrubBand(controller)
             ControlsRow(controller, onMenuClick)
             CustomKeyboard(controller, Modifier.fillMaxWidth().height(keyboardHeight))
+        }
+
+        // Loading a freshly opened video: black takeover with a spinner until its cue timeline is
+        // extracted, so playback never starts mid-load (and practice jumps always have the timeline).
+        if (controller.isLoading) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = HighlightYellow)
+                    Spacer(Modifier.height(20.dp))
+                    Text("Loading…", color = Color.White, fontSize = 18.sp)
+                }
+            }
         }
 
         // "It's time to practice typing!" — black takeover while the prompt is spoken (video hidden).
@@ -331,13 +348,11 @@ private fun StarScrubBand(controller: GameController) {
             if (bandW > 0f && i in 0..2) bursts.fire((i + 1) / 4f * bandW, bandH / 2f, bandW * 0.05f)
         }
     }
-    // Screen-width burst around the scrub bar the moment it unlocks.
+    // Scrub-bar unlock effect: intentionally NO visual for now. The old fireworks were rejected;
+    // the real celebration is being chosen from the preview candidates and will be wired in here.
     var prevUnlockTick by remember { mutableIntStateOf(controller.scrubUnlockTick) }
     LaunchedEffect(controller.scrubUnlockTick) {
-        if (controller.scrubUnlockTick != prevUnlockTick) {
-            prevUnlockTick = controller.scrubUnlockTick
-            if (bandW > 0f) bursts.fire(bandW / 2f, bandH / 2f, bandW * 0.55f, particleCount = 64)
-        }
+        prevUnlockTick = controller.scrubUnlockTick   // consume the tick; fire nothing
     }
 
     val sliderFrac = if (dragValue >= 0f) dragValue
