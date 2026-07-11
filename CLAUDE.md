@@ -8,6 +8,10 @@ Two implementations live in this repo: the original desktop app (`video_player.p
 
 Handle the user's requests in the order they are received, and don't get derailed. Claude Code surfaces follow-up requests as mid-turn messages while a task is in flight — when one arrives, finish the current change first (build, verify on-device, and commit it) before starting the new one. Never drop, silently interleave, or lose track of an in-flight task because a new request came in; queue new requests and work through them in order.
 
+## Audio: never re-encode — copy it
+
+Never re-encode / transcode / downmix / reduce the bitrate of audio. Always `-c:a copy` and keep the original track. Clear audio matters (Apollo listens to the movie while he types), and "it's just phone playback" is NOT a reason to degrade it — phone playback does not reduce the need for clear audio. When re-encoding video (scaling, HEVC, etc.), still copy the audio unchanged. If a task genuinely seems to require altering the audio samples (e.g. muting a section), find a copy-preserving approach (trim/splice with `-c:a copy`) or ask first — do not silently transcode.
+
 ## Phone / adb safety (OLED screen)
 
 Apollo's phone is tested over wireless adb and has an OLED screen (burn-in risk). A PreToolUse hook (`.claude/settings.json`) blocks any `svc power stayon true` / non-zero `stay_on_while_plugged_in` command, so the screen is never left on while charging — don't work around it; use a one-shot `adb shell input keyevent KEYCODE_WAKEUP` for a brief wake. The app's own `FLAG_KEEP_SCREEN_ON` is deliberately scoped to active playback only (cleared when paused, including every typing round).
